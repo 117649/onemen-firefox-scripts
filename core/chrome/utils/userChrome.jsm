@@ -99,7 +99,7 @@ let _uc = {
   },
 
   everLoaded: [],
-
+  
   loadScript: function (script, win) {
     if (!script.regex.test(win.location.href) || (script.filename != this.ALWAYSEXECUTE && !script.isEnabled)) {
       return;
