@@ -2,11 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-let EXPORTED_SYMBOLS = [];
+'use strict';
 
-const { xPref } = ChromeUtils.import('chrome://userchromejs/content/xPref.jsm');
-const { Management } = ChromeUtils.import('resource://gre/modules/Extension.jsm');
-const { AppConstants } = ChromeUtils.import('resource://gre/modules/AppConstants.jsm');
+ChromeUtils.defineESModuleGetters(this, {
+  xPref: 'chrome://userchromejs/content/xPref.sys.mjs',
+  Management: 'resource://gre/modules/Extension.sys.mjs',
+  AppConstants: 'resource://gre/modules/AppConstants.sys.mjs',
+});
 
 let UC = {
   webExts: new Map(),
@@ -99,7 +101,7 @@ let _uc = {
   },
 
   everLoaded: [],
-  
+
   loadScript: function (script, win) {
     if (!script.regex.test(win.location.href) || (script.filename != this.ALWAYSEXECUTE && !script.isEnabled)) {
       return;

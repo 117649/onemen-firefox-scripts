@@ -2,9 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-let EXPORTED_SYMBOLS = ['xPref'];
+'use strict';
 
-var xPref = {
+export const xPref = {
   // Retorna o valor da preferência, seja qual for o tipo, mas não
   // testei com tipos complexos como nsIFile, não sei como detectar
   // uma preferência assim, na verdade nunca vi uma
