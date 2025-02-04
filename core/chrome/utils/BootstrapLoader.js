@@ -39,7 +39,8 @@ Services.obs.addObserver(doc => {
     let update_orig = win.customElements.get('addon-options').prototype.update;
     win.customElements.get('addon-options').prototype.update = function (card, addon) {
       update_orig.apply(this, arguments);
-      if (addon.__AddonInternal__.optionsType == 1/*AddonManager.OPTIONS_TYPE_DIALOG*/)
+      if (addon.type === 'extension' &&
+        addon.__AddonInternal__.optionsType == 1/*AddonManager.OPTIONS_TYPE_DIALOG*/)
         this.querySelector('panel-item[data-l10n-id="preferences-addon-button"]').hidden = false;
     }
   }
