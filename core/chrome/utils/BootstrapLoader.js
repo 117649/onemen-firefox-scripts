@@ -77,6 +77,12 @@ ChromeUtils.defineLazyGetter(this, "logger", () => {
   return new ConsoleAPI(consoleOptions);
 });
 
+const FileOutputStream = Components.Constructor(
+  "@mozilla.org/network/file-output-stream;1",
+  "nsIFileOutputStream",
+  "init"
+);
+
 /**
  * Valid IDs fit this pattern.
  */
@@ -430,33 +436,26 @@ var BootstrapLoader = {
     // Register a chrome manifest temporarily and return a function which un-does
     // the registrarion when no longer needed.
     function createManifestTemporarily(manifestText) {
-      let tempDir = Services.dirsvc.get('ProfD', Ci.nsIFile)
-      tempDir.append('browser-extension-data');
-      tempDir.append(addon.id);
-      tempDir.append('manifests');
-      if (tempDir.exists()) {
-        // Clean any leftover temp.manifest
-        tempDir.remove(true);
-      }
-      tempDir.append('temp.manifest.' + Date.now());
+      // we store the temporary file in the user's profile, in a subdirectory
+      // analogous to webExtension's "browser-extension-data".
+      let manifest = Services.dirsvc.get('ProfD', Ci.nsIFile)
+      manifest.append('legacy-extension-data');
+      manifest.append(addon.id);
+      manifest.exists() || manifest.create(Ci.nsIFile.DIRECTORY_TYPE, 0o755);
+      manifest.append('chrome.manifest'); /* created or truncated by ostream */
 
-      let foStream = Cc[
-        '@mozilla.org/network/file-output-stream;1'
-      ].createInstance(Ci.nsIFileOutputStream);
-      foStream.init(tempDir, 0x02 | 0x08 | 0x20, 0o664, 0); // write, create, truncate
-      foStream.write(manifestText, manifestText.length);
-      foStream.close();
+      // write modified chrome.manifest to profile directory
+      let ostream = new FileOutputStream(manifest, -1, -1, 0);
+      ostream.write(manifestText, manifestText.length);
+      ostream.close();
 
-      Components.manager
-        .QueryInterface(Ci.nsIComponentRegistrar)
-        .autoRegister(tempDir);
-
-      Cc['@mozilla.org/uriloader/external-helper-app-service;1']
-        .getService(Ci.nsPIExternalAppLauncher)
-        .deleteTemporaryFileOnExit(tempDir);
+      // let Firefox read and parse it
+      Components.manager.QueryInterface(Ci.nsIComponentRegistrar).autoRegister(manifest);
 
       return function () {
-        tempDir.fileSize = 0; // truncate the manifest
+        if (manifest.exists()) {
+          manifest.parent.remove(/*recursive=*/true)
+        };
         Cc['@mozilla.org/chrome/chrome-registry;1']
           .getService(Ci.nsIXULChromeRegistry)
           .checkForNewChrome();
