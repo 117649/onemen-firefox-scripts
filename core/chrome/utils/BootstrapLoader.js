@@ -10,6 +10,7 @@ ChromeUtils.defineESModuleGetters(this, {
   Blocklist: 'resource://gre/modules/Blocklist.sys.mjs',
   ConsoleAPI: 'resource://gre/modules/Console.sys.mjs',
   InstallRDF: 'chrome://userchromejs/content/RDFManifestConverter.sys.mjs',
+  getNameFromRDF: 'chrome://userchromejs/content/getNameFromRDF.sys.mjs',
   ChromeManifest: 'chrome://userchromejs/content/ChromeManifest.sys.mjs',
 });
 
@@ -395,16 +396,16 @@ var BootstrapLoader = {
     let shutdown = findMethod('shutdown');
 
     /**
-     * Reads content from a jar: URI
+     * Reads content from a jar/folder URI
      *
-     * @param {nsIURI} jarURI - The jar: URI to read from
-     * @returns {Promise<string>} The content of the file inside the JAR
+     * @param {nsIURI} uri - The jar/folder URI to read from
+     * @returns {Promise<string>} The content of the file inside the jar/folder
      */
-    async function readFromJarURI(jarURI) {
+    async function readFromURI(uri) {
       return new Promise((resolve, reject) => {
         try {
           const channel = Services.io.newChannelFromURI(
-            jarURI,
+            uri,
             null,
             Services.scriptSecurityManager.getSystemPrincipal(),
             null,
@@ -477,9 +478,18 @@ var BootstrapLoader = {
 
       async startup(...args) {
         if (addon.type == 'extension') {
-          logger.debug(`Registering manifest for ${file.path}\n`);
           const manifestURI = getURIForResourceInFile(file, 'chrome.manifest');
-          let manifestData = await readFromJarURI(manifestURI);
+          const installURI = getURIForResourceInFile(file, 'install.rdf');
+          const [manifestData, installData] = await Promise.all([
+            readFromURI(manifestURI),
+            readFromURI(installURI).catch(() => {}),
+          ])
+          const {name, version} = InstallRDF.loadFromString(installData).getProps(["name", "version"])
+          if (name && version) {
+            logger.debug(`Registering manifest for: ${name} version ${version}\n${file.path}\n`);
+          } else {
+            logger.debug(`Registering manifest for ${file.path}\n`);
+          }
           let chromeManifest = new ChromeManifest(() => {
             return manifestData;
           }, {
