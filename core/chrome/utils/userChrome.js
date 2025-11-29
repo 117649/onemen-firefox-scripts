@@ -196,11 +196,18 @@ if (xPref.get(_uc.PREF_SCRIPTSDISABLED) === undefined) {
 
 let UserChrome_js = {
   observe: function (aSubject) {
-    aSubject.addEventListener('DOMContentLoaded', this, {once: true});
+    if (aSubject.document.isUncommittedInitialDocument) {
+      const parent = aSubject.parent;
+      aSubject.addEventListener("DOMContentLoaded", () => {
+        parent.addEventListener("DOMContentLoaded", this, {once: true, capture: true})
+      }, {once:true})
+    } else {
+      aSubject.addEventListener('DOMContentLoaded', this, {once: true, capture: true});
+    }
   },
 
   handleEvent: function (aEvent) {
-    let document = aEvent.originalTarget;
+    let document = aEvent.target;
     let window = document.defaultView;
     this.load(window);
   },
@@ -257,5 +264,5 @@ if (!Services.appinfo.inSafeMode) {
     if (!('UC' in win))
       UserChrome_js.load(win)
   }
-  Services.obs.addObserver(UserChrome_js, 'chrome-document-global-created', false);
+  Services.obs.addObserver(UserChrome_js, 'domwindowopened', false);
 }
