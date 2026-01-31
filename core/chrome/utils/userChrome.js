@@ -196,7 +196,16 @@ if (xPref.get(_uc.PREF_SCRIPTSDISABLED) === undefined) {
 
 let UserChrome_js = {
   observe: function (aSubject) {
-    aSubject.addEventListener('DOMContentLoaded', this, {once: true});
+    if (
+      AppConstants.MOZ_APP_NAME == "thunderbird" &&
+      aSubject?.location?.href.startsWith("chrome://messenger/content")
+    ) {
+      aSubject.addEventListener("DOMContentLoaded", () => {
+        this.load(aSubject);
+      }, {once: true})
+    } else {
+      aSubject.addEventListener('DOMContentLoaded', this, {once: true});
+    }
   },
 
   handleEvent: function (aEvent) {
