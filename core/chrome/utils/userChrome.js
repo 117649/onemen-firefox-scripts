@@ -295,12 +295,14 @@ let UserChrome_js = {
       'Extension:BackgroundViewLoaded',
       this.messageListener
     );
+    let documentGlobal = browser.ownerGlobal ?? browser.documentGlobal;
 
-    if (browser.ownerGlobal.location.href == 'chrome://extensions/content/dummy.xhtml') {
+    if (documentGlobal.location.href == 'chrome://extensions/content/dummy.xhtml') {
       UC.webExts.set(addonId, browser);
       Services.obs.notifyObservers(null, 'UCJS:WebExtLoaded', addonId);
     } else {
-      let win = browser.ownerGlobal.windowRoot.ownerGlobal;
+      let windowRoot = documentGlobal.windowRoot;
+      let win = windowRoot.ownerGlobal ?? windowRoot.documentGlobal;
       UC.sidebar.get(addonId)?.set(win, browser) ||
         UC.sidebar.set(addonId, new Map([[win, browser]]));
       Services.obs.notifyObservers(win, 'UCJS:SidebarLoaded', addonId);
