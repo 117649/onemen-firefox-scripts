@@ -9,7 +9,7 @@ export const xPref = {
   // testei com tipos complexos como nsIFile, não sei como detectar
   // uma preferência assim, na verdade nunca vi uma
   get: function (prefPath, def = false, valueIfUndefined, setDefault = true) {
-    let sPrefs = def ? Services.prefs.getDefaultBranch(null) : Services.prefs;
+    const sPrefs = def ? Services.prefs.getDefaultBranch(null) : Services.prefs;
 
     try {
       switch (sPrefs.getPrefType(prefPath)) {
@@ -31,7 +31,7 @@ export const xPref = {
   },
 
   set: function (prefPath, value, def = false) {
-    let sPrefs = def ? Services.prefs.getDefaultBranch(null) : Services.prefs;
+    const sPrefs = def ? Services.prefs.getDefaultBranch(null) : Services.prefs;
 
     switch (typeof value) {
       case 'string':
@@ -45,7 +45,7 @@ export const xPref = {
   },
 
   lock: function (prefPath, value) {
-    let sPrefs = Services.prefs;
+    const sPrefs = Services.prefs;
     this.lockedBackupDef[prefPath] = this.get(prefPath, true);
     if (sPrefs.prefIsLocked(prefPath)) sPrefs.unlockPref(prefPath);
 
@@ -57,7 +57,7 @@ export const xPref = {
 
   unlock: function (prefPath) {
     Services.prefs.unlockPref(prefPath);
-    let bkp = this.lockedBackupDef[prefPath];
+    const bkp = this.lockedBackupDef[prefPath];
     if (bkp == undefined) Services.prefs.deleteBranch(prefPath);
     else this.set(prefPath, bkp, true);
   },

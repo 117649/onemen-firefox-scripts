@@ -54,6 +54,7 @@ export default defineConfig([
           varsIgnorePattern: '^ignored',
         },
       ],
+      'prefer-const': 'error',
     },
   },
 

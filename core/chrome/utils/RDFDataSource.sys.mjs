@@ -123,7 +123,7 @@ class RDFSubject extends RDFNode {
     }
 
     // Certain attributes can be literal properties
-    for (let attr of element.attributes) {
+    for (const attr of element.attributes) {
       if (attr.namespaceURI == NS_XML || attr.namespaceURI == NS_XMLNS || attr.nodeName == 'xmlns')
         continue;
       if (
@@ -156,7 +156,7 @@ class RDFSubject extends RDFNode {
         }
 
         // Check for and bail out on unknown attributes on the property element
-        for (let attr of child.attributes) {
+        for (const attr of child.attributes) {
           // Ignore XML namespaced attributes
           if (attr.namespaceURI == NS_XML) continue;
           // These are reserved by XML for future use
@@ -277,7 +277,7 @@ export class RDFBlankNode extends RDFSubject {
     // a nodeID to match them
     if (!this._nodeID && this._elements.length > 0) {
       this._ds._createNodeID(this);
-      for (let element of this._elements) this._applyToElement(element);
+      for (const element of this._elements) this._applyToElement(element);
     }
 
     return super._createNewElement.call(uri);
@@ -289,12 +289,12 @@ export class RDFBlankNode extends RDFSubject {
       // In document elsewhere already
       // Create a node ID and update the other nodes referencing
       this._ds._createNodeID(this);
-      for (let element of this._elements) this._applyToElement(element);
+      for (const element of this._elements) this._applyToElement(element);
     }
 
     if (this._nodeID) {
       if (USE_RDFNS_ATTR) {
-        let prefix = this._ds._resolvePrefix(element, RDF_R('nodeID'));
+        const prefix = this._ds._resolvePrefix(element, RDF_R('nodeID'));
         element.setAttributeNS(prefix.namespaceURI, prefix.qname, this._nodeID);
       } else {
         element.setAttribute('nodeID', this._nodeID);
@@ -337,8 +337,8 @@ export class RDFDataSource {
   }
 
   static loadFromString(text) {
-    let parser = new DOMParser();
-    let document = parser.parseFromString(text, 'application/xml');
+    const parser = new DOMParser();
+    const document = parser.parseFromString(text, 'application/xml');
 
     return new this(document);
   }
@@ -351,7 +351,7 @@ export class RDFDataSource {
     var about = getRDFAttribute(element, 'about');
 
     if (about !== undefined) {
-      let base = Services.io.newURI(element.baseURI);
+      const base = Services.io.newURI(element.baseURI);
       return this.getResource(base.resolve(about));
     }
     return this.getBlankNode(null);

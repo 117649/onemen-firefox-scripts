@@ -9,8 +9,8 @@
 
 UC.restart_button = {
   elBuilder: function (doc, tag, props) {
-    let el = doc.createXULElement(tag);
-    for (let p in props) {
+    const el = doc.createXULElement(tag);
+    for (const p in props) {
       el.setAttribute(p, props[p]);
     }
     return el;

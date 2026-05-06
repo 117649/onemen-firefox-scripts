@@ -31,8 +31,8 @@ class Manifest {
 
 export class InstallRDF extends Manifest {
   _readProps(source, obj, props) {
-    for (let prop of props) {
-      let val = getProperty(source, prop);
+    for (const prop of props) {
+      const val = getProperty(source, prop);
       if (val != null) {
         obj[prop] = val;
       }
@@ -40,14 +40,14 @@ export class InstallRDF extends Manifest {
   }
 
   _readArrayProp(source, obj, prop, target, decode = getValue) {
-    let result = Array.from(source.getObjects(EM_R(prop)), target => decode(target));
+    const result = Array.from(source.getObjects(EM_R(prop)), target => decode(target));
     if (result.length) {
       obj[target] = result;
     }
   }
 
   _readArrayProps(source, obj, props, decode = getValue) {
-    for (let [prop, target] of Object.entries(props)) {
+    for (const [prop, target] of Object.entries(props)) {
       this._readArrayProp(source, obj, prop, target, decode);
     }
   }
@@ -63,10 +63,10 @@ export class InstallRDF extends Manifest {
   }
 
   decode() {
-    let root = this.ds.getResource(RDFURI_INSTALL_MANIFEST_ROOT);
-    let result = {};
+    const root = this.ds.getResource(RDFURI_INSTALL_MANIFEST_ROOT);
+    const result = {};
 
-    let props = [
+    const props = [
       'id',
       'version',
       'type',
@@ -81,14 +81,14 @@ export class InstallRDF extends Manifest {
     ];
     this._readProps(root, result, props);
 
-    let decodeTargetApplication = source => {
-      let app = {};
+    const decodeTargetApplication = source => {
+      const app = {};
       this._readProps(source, app, ['id', 'minVersion', 'maxVersion']);
       return app;
     };
 
-    let decodeLocale = source => {
-      let localized = {};
+    const decodeLocale = source => {
+      const localized = {};
       this._readLocaleStrings(source, localized);
       return localized;
     };
@@ -111,8 +111,8 @@ export class InstallRDF extends Manifest {
   }
 
   getProps(props) {
-    let root = this.ds.getResource(RDFURI_INSTALL_MANIFEST_ROOT);
-    let result = {};
+    const root = this.ds.getResource(RDFURI_INSTALL_MANIFEST_ROOT);
+    const result = {};
     this._readProps(root, result, props);
     return result;
   }

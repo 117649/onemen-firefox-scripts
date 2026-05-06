@@ -19,7 +19,7 @@ Services.obs.addObserver(doc => {
     doc.location.protocol + doc.location.pathname === 'chrome:/content/extensions/aboutaddons.html'
   ) {
     const win = doc.defaultView;
-    let handleEvent_orig = win.customElements.get('addon-card').prototype.handleEvent;
+    const handleEvent_orig = win.customElements.get('addon-card').prototype.handleEvent;
     win.customElements.get('addon-card').prototype.handleEvent = function (e) {
       if (
         e.type === 'click' &&
@@ -48,7 +48,7 @@ Services.obs.addObserver(doc => {
         handleEvent_orig.apply(this, arguments);
       }
     };
-    let update_orig = win.customElements.get('addon-options').prototype.update;
+    const update_orig = win.customElements.get('addon-options').prototype.update;
     win.customElements.get('addon-options').prototype.update = function (card, addon) {
       update_orig.apply(this, arguments);
       if (
@@ -83,8 +83,8 @@ ChromeUtils.defineLazyGetter(this, 'BOOTSTRAP_REASONS', () => {
 });
 
 ChromeUtils.defineLazyGetter(this, 'logger', () => {
-  let {ConsoleAPI} = ChromeUtils.importESModule('resource://gre/modules/Console.sys.mjs');
-  let consoleOptions = {
+  const {ConsoleAPI} = ChromeUtils.importESModule('resource://gre/modules/Console.sys.mjs');
+  const consoleOptions = {
     maxLogLevel: 'all',
     prefix: 'BootstrapLoader',
   };
@@ -131,7 +131,7 @@ const COMPATIBLE_BY_DEFAULT_TYPES = {
 const hasOwnProperty = Function.call.bind(Object.prototype.hasOwnProperty);
 
 function isXPI(filename) {
-  let ext = filename.slice(-4).toLowerCase();
+  const ext = filename.slice(-4).toLowerCase();
   return ext === '.xpi' || ext === '.zip';
 }
 
@@ -149,7 +149,7 @@ function isXPI(filename) {
  */
 function getURIForResourceInFile(aFile, aPath) {
   if (!isXPI(aFile.leafName)) {
-    let resource = aFile.clone();
+    const resource = aFile.clone();
     if (aPath) aPath.split('/').forEach(part => resource.append(part));
 
     return Services.io.newFileURI(resource);
@@ -188,10 +188,10 @@ var BootstrapLoader = {
      * @returns {Object} an object containing the locale properties
      */
     function readLocale(aSource, isDefault, aSeenLocales) {
-      let locale = {};
+      const locale = {};
       if (!isDefault) {
         locale.locales = [];
-        for (let localeName of aSource.locales || []) {
+        for (const localeName of aSource.locales || []) {
           if (!localeName) {
             logger.warn('Ignoring empty locale in localized properties');
             continue;
@@ -210,7 +210,7 @@ var BootstrapLoader = {
         }
       }
 
-      for (let prop of [...PROP_LOCALE_SINGLE, ...PROP_LOCALE_MULTI]) {
+      for (const prop of [...PROP_LOCALE_SINGLE, ...PROP_LOCALE_MULTI]) {
         if (hasOwnProperty(aSource, prop)) {
           locale[prop] = aSource[prop];
         }
@@ -219,11 +219,11 @@ var BootstrapLoader = {
       return locale;
     }
 
-    let manifestData = await pkg.readString('install.rdf');
-    let manifest = InstallRDF.loadFromString(manifestData).decode();
+    const manifestData = await pkg.readString('install.rdf');
+    const manifest = InstallRDF.loadFromString(manifestData).decode();
 
-    let addon = new AddonInternal();
-    for (let prop of PROP_METADATA) {
+    const addon = new AddonInternal();
+    for (const prop of PROP_METADATA) {
       if (hasOwnProperty(manifest, prop)) {
         addon[prop] = manifest[prop];
       }
@@ -232,9 +232,9 @@ var BootstrapLoader = {
     if (!addon.type) {
       addon.type = 'extension';
     } else {
-      let type = addon.type;
+      const type = addon.type;
       addon.type = null;
-      for (let name in TYPES) {
+      for (const name in TYPES) {
         if (TYPES[name] == type) {
           addon.type = name;
           break;
@@ -272,19 +272,19 @@ var BootstrapLoader = {
 
     addon.defaultLocale = readLocale(manifest, true);
 
-    let seenLocales = [];
+    const seenLocales = [];
     addon.locales = [];
-    for (let localeData of manifest.localized || []) {
-      let locale = readLocale(localeData, false, seenLocales);
+    for (const localeData of manifest.localized || []) {
+      const locale = readLocale(localeData, false, seenLocales);
       if (locale) addon.locales.push(locale);
     }
 
-    let dependencies = new Set(manifest.dependencies);
+    const dependencies = new Set(manifest.dependencies);
     addon.dependencies = Object.freeze(Array.from(dependencies));
 
-    let seenApplications = [];
+    const seenApplications = [];
     addon.targetApplications = [];
-    for (let targetApp of manifest.targetApplications || []) {
+    for (const targetApp of manifest.targetApplications || []) {
       if (!targetApp.id || !targetApp.minVersion || !targetApp.maxVersion) {
         logger.warn('Ignoring invalid targetApplication entry in install manifest');
         continue;
@@ -302,13 +302,13 @@ var BootstrapLoader = {
     // Note that we don't need to check for duplicate targetPlatform entries since
     // the RDF service coalesces them for us.
     addon.targetPlatforms = [];
-    for (let targetPlatform of manifest.targetPlatforms || []) {
-      let platform = {
+    for (const targetPlatform of manifest.targetPlatforms || []) {
+      const platform = {
         os: null,
         abi: null,
       };
 
-      let pos = targetPlatform.indexOf('_');
+      const pos = targetPlatform.indexOf('_');
       if (pos != -1) {
         platform.os = targetPlatform.substring(0, pos);
         platform.abi = targetPlatform.substring(pos + 1);
@@ -349,11 +349,11 @@ var BootstrapLoader = {
   },
 
   loadScope(addon) {
-    let file = addon.file || addon._sourceBundle;
-    let uri = getURIForResourceInFile(file, 'bootstrap.js').spec;
-    let principal = Services.scriptSecurityManager.getSystemPrincipal();
+    const file = addon.file || addon._sourceBundle;
+    const uri = getURIForResourceInFile(file, 'bootstrap.js').spec;
+    const principal = Services.scriptSecurityManager.getSystemPrincipal();
 
-    let sandbox = new Cu.Sandbox(principal, {
+    const sandbox = new Cu.Sandbox(principal, {
       sandboxName: uri,
       addonId: addon.id,
       wantGlobalProperties: ['ChromeUtils'],
@@ -387,7 +387,7 @@ var BootstrapLoader = {
       }
 
       try {
-        let method = Cu.evalInSandbox(name, sandbox);
+        const method = Cu.evalInSandbox(name, sandbox);
         return method;
       } catch {
         //
@@ -398,10 +398,10 @@ var BootstrapLoader = {
       };
     }
 
-    let install = findMethod('install');
-    let uninstall = findMethod('uninstall');
-    let startup = findMethod('startup');
-    let shutdown = findMethod('shutdown');
+    const install = findMethod('install');
+    const uninstall = findMethod('uninstall');
+    const startup = findMethod('startup');
+    const shutdown = findMethod('shutdown');
 
     /**
      * Reads content from a jar/folder URI
@@ -442,7 +442,7 @@ var BootstrapLoader = {
         return typeof loc === 'string' && !loc.match(/^(?:[a-zA-Z]+:|\\)/);
       };
 
-      let words = line.trim().split(/\s+/);
+      const words = line.trim().split(/\s+/);
       const index = manifestMethodPathLocation[words[0]];
 
       if (index && isRelative(words[index])) {
@@ -455,16 +455,16 @@ var BootstrapLoader = {
 
     // Register a chrome manifest temporarily and return a function which un-does
     // the registrarion when no longer needed.
-    let tempDir = Services.dirsvc.get('ProfD', Ci.nsIFile);
+    const tempDir = Services.dirsvc.get('ProfD', Ci.nsIFile);
     tempDir.append('browser-extension-data');
     tempDir.append(addon.id);
 
     function createManifestTemporarily(manifestText) {
-      let tempFile = tempDir.clone();
+      const tempFile = tempDir.clone();
       tempFile.append('chrome.manifest');
       tempFile.exists();
 
-      let foStream = Cc['@mozilla.org/network/file-output-stream;1'].createInstance(
+      const foStream = Cc['@mozilla.org/network/file-output-stream;1'].createInstance(
         Ci.nsIFileOutputStream
       );
       foStream.init(tempFile, 0x02 | 0x08 | 0x20, 0o664, 0); // write, create, truncate
@@ -501,8 +501,8 @@ var BootstrapLoader = {
 
       startup(...args) {
         if (addon.type == 'extension') {
-          let installURI = getURIForResourceInFile(file, 'install.rdf');
-          let installData = readFromJarURI(installURI);
+          const installURI = getURIForResourceInFile(file, 'install.rdf');
+          const installData = readFromJarURI(installURI);
           const {name, version} = InstallRDF.loadFromString(installData).getProps([
             'name',
             'version',
@@ -512,9 +512,9 @@ var BootstrapLoader = {
           } else {
             logger.debug(`Registering manifest for ${file.path}\n`);
           }
-          let manifestURI = getURIForResourceInFile(file, 'chrome.manifest');
-          let manifestData = readFromJarURI(manifestURI);
-          let chromeManifest = manifestData
+          const manifestURI = getURIForResourceInFile(file, 'chrome.manifest');
+          const manifestData = readFromJarURI(manifestURI);
+          const chromeManifest = manifestData
             .split('\n')
             .map(absolutizePaths.bind(null, file))
             .join('\n');
