@@ -1,11 +1,11 @@
- /* This Source Code Form is subject to the terms of the Mozilla Public
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-"use strict";
+'use strict';
 
-import { RDFDataSource } from "chrome://userchromejs/content/RDFDataSource.sys.mjs";
+import {RDFDataSource} from 'chrome://userchromejs/content/RDFDataSource.sys.mjs';
 
-const RDFURI_INSTALL_MANIFEST_ROOT = "urn:mozilla:install-manifest";
+const RDFURI_INSTALL_MANIFEST_ROOT = 'urn:mozilla:install-manifest';
 
 function EM_R(aProperty) {
   return `http://www.mozilla.org/2004/em-rdf#${aProperty}`;
@@ -40,8 +40,7 @@ export class InstallRDF extends Manifest {
   }
 
   _readArrayProp(source, obj, prop, target, decode = getValue) {
-    let result = Array.from(source.getObjects(EM_R(prop)),
-                            target => decode(target));
+    let result = Array.from(source.getObjects(EM_R(prop)), target => decode(target));
     if (result.length) {
       obj[target] = result;
     }
@@ -54,12 +53,12 @@ export class InstallRDF extends Manifest {
   }
 
   _readLocaleStrings(source, obj) {
-    this._readProps(source, obj, ["name", "description", "creator", "homepageURL"]);
+    this._readProps(source, obj, ['name', 'description', 'creator', 'homepageURL']);
     this._readArrayProps(source, obj, {
-      locale: "locales",
-      developer: "developers",
-      translator: "translators",
-      contributor: "contributors",
+      locale: 'locales',
+      developer: 'developers',
+      translator: 'translators',
+      contributor: 'contributors',
     });
   }
 
@@ -67,14 +66,24 @@ export class InstallRDF extends Manifest {
     let root = this.ds.getResource(RDFURI_INSTALL_MANIFEST_ROOT);
     let result = {};
 
-    let props = ["id", "version", "type", "updateURL", "optionsURL",
-                 "optionsType", "aboutURL", "iconURL",
-                 "bootstrap", "unpack", "strictCompatibility"];
+    let props = [
+      'id',
+      'version',
+      'type',
+      'updateURL',
+      'optionsURL',
+      'optionsType',
+      'aboutURL',
+      'iconURL',
+      'bootstrap',
+      'unpack',
+      'strictCompatibility',
+    ];
     this._readProps(root, result, props);
 
     let decodeTargetApplication = source => {
       let app = {};
-      this._readProps(source, app, ["id", "minVersion", "maxVersion"]);
+      this._readProps(source, app, ['id', 'minVersion', 'maxVersion']);
       return app;
     };
 
@@ -86,13 +95,17 @@ export class InstallRDF extends Manifest {
 
     this._readLocaleStrings(root, result);
 
-    this._readArrayProps(root, result, {"targetPlatform": "targetPlatforms"});
-    this._readArrayProps(root, result, {"targetApplication": "targetApplications"},
-                         decodeTargetApplication);
-    this._readArrayProps(root, result, {"localized": "localized"},
-                         decodeLocale);
-    this._readArrayProps(root, result, {"dependency": "dependencies"},
-                         source => getProperty(source, "id"));
+    this._readArrayProps(root, result, {targetPlatform: 'targetPlatforms'});
+    this._readArrayProps(
+      root,
+      result,
+      {targetApplication: 'targetApplications'},
+      decodeTargetApplication
+    );
+    this._readArrayProps(root, result, {localized: 'localized'}, decodeLocale);
+    this._readArrayProps(root, result, {dependency: 'dependencies'}, source =>
+      getProperty(source, 'id')
+    );
 
     return result;
   }

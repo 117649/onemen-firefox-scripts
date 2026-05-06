@@ -1,0 +1,8 @@
+# ignore imported types
+**/gecko/**/*.*
+.vscode
+logs
+*.css
+*.xhtml
+**/*local*/**
+pnpm-lock.yaml 

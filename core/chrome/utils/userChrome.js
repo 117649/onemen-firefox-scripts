@@ -13,21 +13,25 @@ ChromeUtils.defineESModuleGetters(this, {
 let UC = {
   webExts: new Map(),
   sidebar: new Map(),
-  sandboxes: new WeakMap()
+  sandboxes: new WeakMap(),
 };
 
 let _uc = {
   ALWAYSEXECUTE: 'rebuild_userChrome.uc.js',
-  BROWSERCHROME: AppConstants.MOZ_APP_NAME == 'thunderbird' ? 'chrome://messenger/content/messenger.xhtml' : 'chrome://browser/content/browser.xhtml',
+  BROWSERCHROME:
+    AppConstants.MOZ_APP_NAME == 'thunderbird' ?
+      'chrome://messenger/content/messenger.xhtml'
+    : 'chrome://browser/content/browser.xhtml',
   BROWSERTYPE: AppConstants.MOZ_APP_NAME == 'thunderbird' ? 'mail:3pane' : 'navigator:browser',
-  BROWSERNAME: AppConstants.MOZ_APP_NAME.charAt(0).toUpperCase() + AppConstants.MOZ_APP_NAME.slice(1),
+  BROWSERNAME:
+    AppConstants.MOZ_APP_NAME.charAt(0).toUpperCase() + AppConstants.MOZ_APP_NAME.slice(1),
   PREF_ENABLED: 'userChromeJS.enabled',
   PREF_SCRIPTSDISABLED: 'userChromeJS.scriptsDisabled',
 
   chromedir: Services.dirsvc.get('UChrm', Ci.nsIFile),
   scriptsDir: '',
 
-  sss: Cc["@mozilla.org/content/style-sheet-service;1"].getService(Ci.nsIStyleSheetService),
+  sss: Cc['@mozilla.org/content/style-sheet-service;1'].getService(Ci.nsIStyleSheetService),
 
   getScripts: function () {
     this.scripts = {};
@@ -42,11 +46,14 @@ let _uc = {
 
   getScriptData: function (aFile) {
     let aContent = this.readFile(aFile);
-    let header = (aContent.match(/^\/\/ ==UserScript==\s*\n(?:.*\n)*?\/\/ ==\/UserScript==\s*\n/m) || [''])[0];
-    let match, rex = {
-      include: [],
-      exclude: []
-    };
+    let header = (aContent.match(
+      /^\/\/ ==UserScript==\s*\n(?:.*\n)*?\/\/ ==\/UserScript==\s*\n/m
+    ) || [''])[0];
+    let match,
+      rex = {
+        include: [],
+        exclude: [],
+      };
     let findNextRe = /^\/\/ @(include|exclude)\s+(.+)\s*$/gm;
     while ((match = findNextRe.exec(header))) {
       rex[match[1]].push(match[2].replace(/^main$/i, _uc.BROWSERCHROME).replace(/\*/g, '.*?'));
@@ -60,16 +67,23 @@ let _uc = {
     let author = (header.match(/\/\/ @author\s+(.+)\s*$/im) || def)[1];
     let filename = aFile.leafName || '';
 
-    return this.scripts[filename] = {
+    return (this.scripts[filename] = {
       filename: filename,
       file: aFile,
-      url: Services.io.getProtocolHandler('file').QueryInterface(Ci.nsIFileProtocolHandler).getURLSpecFromDir(this.chromedir) + filename,
+      url:
+        Services.io
+          .getProtocolHandler('file')
+          .QueryInterface(Ci.nsIFileProtocolHandler)
+          .getURLSpecFromDir(this.chromedir) + filename,
       name: (header.match(/\/\/ @name\s+(.+)\s*$/im) || def)[1],
       description: (header.match(/\/\/ @description\s+(.+)\s*$/im) || def)[1],
       version: (header.match(/\/\/ @version\s+(.+)\s*$/im) || def)[1],
       author: (header.match(/\/\/ @author\s+(.+)\s*$/im) || def)[1],
       regex: new RegExp('^' + exclude + '(' + (rex.include.join('|') || '.*') + ')$', 'i'),
-      id: (header.match(/\/\/ @id\s+(.+)\s*$/im) || ['', filename.split('.uc.js')[0] + '@' + (author || 'userChromeJS')])[1],
+      id: (header.match(/\/\/ @id\s+(.+)\s*$/im) || [
+        '',
+        filename.split('.uc.js')[0] + '@' + (author || 'userChromeJS'),
+      ])[1],
       homepageURL: (header.match(/\/\/ @homepageURL\s+(.+)\s*$/im) || def)[1],
       downloadURL: (header.match(/\/\/ @downloadURL\s+(.+)\s*$/im) || def)[1],
       updateURL: (header.match(/\/\/ @updateURL\s+(.+)\s*$/im) || def)[1],
@@ -80,17 +94,21 @@ let _uc = {
       isRunning: false,
       get isEnabled() {
         return (xPref.get(_uc.PREF_SCRIPTSDISABLED) || '').split(',').indexOf(this.filename) == -1;
-      }
-    }
+      },
+    });
   },
 
   readFile: function (aFile, metaOnly = false) {
-    let stream = Cc['@mozilla.org/network/file-input-stream;1'].createInstance(Ci.nsIFileInputStream);
+    let stream = Cc['@mozilla.org/network/file-input-stream;1'].createInstance(
+      Ci.nsIFileInputStream
+    );
     stream.init(aFile, 0x01, 0, 0);
-    let cvstream = Cc['@mozilla.org/intl/converter-input-stream;1'].createInstance(Ci.nsIConverterInputStream);
+    let cvstream = Cc['@mozilla.org/intl/converter-input-stream;1'].createInstance(
+      Ci.nsIConverterInputStream
+    );
     cvstream.init(stream, 'UTF-8', 1024, Ci.nsIConverterInputStream.DEFAULT_REPLACEMENT_CHARACTER);
     let content = '',
-        data = {};
+      data = {};
     while (cvstream.readString(4096, data)) {
       content += data.value;
       if (metaOnly && content.indexOf('// ==/UserScript==') > 0) {
@@ -104,23 +122,34 @@ let _uc = {
   everLoaded: [],
 
   loadScript: function (script, win) {
-    if (!script.regex.test(win.location.href) || (script.filename != this.ALWAYSEXECUTE && !script.isEnabled)) {
+    if (
+      !script.regex.test(win.location.href) ||
+      (script.filename != this.ALWAYSEXECUTE && !script.isEnabled)
+    ) {
       return;
     }
 
     if (script.onlyonce && script.isRunning) {
       if (script.startup) {
-        Cu.evalInSandbox(`(function(script, win){${script.startup}})`, this.getSandbox(win))(script, win);
+        Cu.evalInSandbox(`(function(script, win){${script.startup}})`, this.getSandbox(win))(
+          script,
+          win
+        );
       }
       return;
     }
 
     try {
-      Services.scriptloader.loadSubScript(script.url + '?' + script.file.lastModifiedTime,
-                                          script.onlyonce ? { window: win } : win);
+      Services.scriptloader.loadSubScript(
+        script.url + '?' + script.file.lastModifiedTime,
+        script.onlyonce ? {window: win} : win
+      );
       script.isRunning = true;
       if (script.startup) {
-        Cu.evalInSandbox(`(function(script, win){${script.startup}})`, this.getSandbox(win))(script, win);
+        Cu.evalInSandbox(`(function(script, win){${script.startup}})`, this.getSandbox(win))(
+          script,
+          win
+        );
       }
       if (!script.shutdown) {
         this.everLoaded.push(script.id);
@@ -133,13 +162,12 @@ let _uc = {
   getSandbox: function (doc) {
     if (!UC.sandboxes) UC.sandboxes = new WeakMap();
     let global = Cu.getGlobalForObject(doc);
-    if (UC.sandboxes.has(global))
-      return UC.sandboxes.get(global);
+    if (UC.sandboxes.has(global)) return UC.sandboxes.get(global);
     let sb = Cu.Sandbox(Services.scriptSecurityManager.getSystemPrincipal(), {
       sandboxPrototype: global,
       sameZoneAs: global,
       wantXrays: false,
-      sandboxName: 'UCJS:Sandbox'
+      sandboxName: 'UCJS:Sandbox',
     });
     UC.sandboxes.set(global, sb);
     global.addEventListener('unload', () => {
@@ -153,22 +181,21 @@ let _uc = {
     let windows = Services.wm.getEnumerator(onlyBrowsers ? this.BROWSERTYPE : null);
     while (windows.hasMoreElements()) {
       let win = windows.getNext();
-      if (!win._uc)
-        continue;
+      if (!win._uc) continue;
       if (!onlyBrowsers) {
-        let frames = win.docShell.getAllDocShellsInSubtree(Ci.nsIDocShellTreeItem.typeAll, Ci.nsIDocShell.ENUMERATE_FORWARDS);
+        let frames = win.docShell.getAllDocShellsInSubtree(
+          Ci.nsIDocShellTreeItem.typeAll,
+          Ci.nsIDocShell.ENUMERATE_FORWARDS
+        );
         let res = frames.some(frame => {
           let fWin = frame.domWindow;
           let {document, location} = fWin;
-          if (fun(document, fWin, location))
-            return true;
+          if (fun(document, fWin, location)) return true;
         });
-        if (res)
-          break;
+        if (res) break;
       } else {
         let {document, location} = win;
-        if (fun(document, win, location))
-          break;
+        if (fun(document, win, location)) break;
       }
     }
   },
@@ -177,13 +204,16 @@ let _uc = {
     let el = XUL ? doc.createXULElement(tag) : doc.createElement(tag);
     for (let att in atts) {
       if (att.startsWith('on'))
-        el.addEventListener(att.slice(2), typeof atts[att] == "string" ?
-          Cu.evalInSandbox(`(function(event){${atts[att]}})`, this.getSandbox(doc)) : atts[att]);
-      else
-        el.setAttribute(att, atts[att]);
+        el.addEventListener(
+          att.slice(2),
+          typeof atts[att] == 'string' ?
+            Cu.evalInSandbox(`(function(event){${atts[att]}})`, this.getSandbox(doc))
+          : atts[att]
+        );
+      else el.setAttribute(att, atts[att]);
     }
-    return el
-  }
+    return el;
+  },
 };
 
 if (xPref.get(_uc.PREF_ENABLED) === undefined) {
@@ -197,12 +227,16 @@ if (xPref.get(_uc.PREF_SCRIPTSDISABLED) === undefined) {
 let UserChrome_js = {
   observe: function (aSubject) {
     if (
-      AppConstants.MOZ_APP_NAME == "thunderbird" &&
-      aSubject?.location?.href.startsWith("chrome://messenger/content")
+      AppConstants.MOZ_APP_NAME == 'thunderbird' &&
+      aSubject?.location?.href.startsWith('chrome://messenger/content')
     ) {
-      aSubject.addEventListener("DOMContentLoaded", () => {
-        this.load(aSubject);
-      }, {once: true})
+      aSubject.addEventListener(
+        'DOMContentLoaded',
+        () => {
+          this.load(aSubject);
+        },
+        {once: true}
+      );
     } else {
       aSubject.addEventListener('DOMContentLoaded', this, {once: true});
     }
@@ -224,14 +258,23 @@ let UserChrome_js = {
     if (!this.sharedWindowOpened && location.href == 'chrome://extensions/content/dummy.xhtml') {
       this.sharedWindowOpened = true;
 
-      Management.on('extension-browser-inserted', function (topic, browser) {
-        browser.messageManager.addMessageListener('Extension:BackgroundViewLoaded', this.messageListener.bind(this));
-      }.bind(this));
-    } else if (/^(chrome:(?!\/\/global\/content\/commonDialog\.x?html)|about:(?!blank))/i.test(location.href)) {
+      Management.on(
+        'extension-browser-inserted',
+        function (topic, browser) {
+          browser.messageManager.addMessageListener(
+            'Extension:BackgroundViewLoaded',
+            this.messageListener.bind(this)
+          );
+        }.bind(this)
+      );
+    } else if (
+      /^(chrome:(?!\/\/global\/content\/commonDialog\.x?html)|about:(?!blank))/i.test(location.href)
+    ) {
       window.UC = UC;
       window._uc = _uc;
       window.xPref = xPref;
-      if (window._gBrowser) // bug 1443849
+      if (window._gBrowser)
+        // bug 1443849
         window.gBrowser = window._gBrowser;
 
       if (xPref.get(_uc.PREF_ENABLED)) {
@@ -246,19 +289,23 @@ let UserChrome_js = {
 
   messageListener: function (msg) {
     const browser = msg.target;
-    const { addonId } = browser._contentPrincipal;
+    const {addonId} = browser._contentPrincipal;
 
-    browser.messageManager.removeMessageListener('Extension:BackgroundViewLoaded', this.messageListener);
+    browser.messageManager.removeMessageListener(
+      'Extension:BackgroundViewLoaded',
+      this.messageListener
+    );
 
     if (browser.ownerGlobal.location.href == 'chrome://extensions/content/dummy.xhtml') {
       UC.webExts.set(addonId, browser);
       Services.obs.notifyObservers(null, 'UCJS:WebExtLoaded', addonId);
     } else {
       let win = browser.ownerGlobal.windowRoot.ownerGlobal;
-      UC.sidebar.get(addonId)?.set(win, browser) || UC.sidebar.set(addonId, new Map([[win, browser]]));
+      UC.sidebar.get(addonId)?.set(win, browser) ||
+        UC.sidebar.set(addonId, new Map([[win, browser]]));
       Services.obs.notifyObservers(win, 'UCJS:SidebarLoaded', addonId);
     }
-  }
+  },
 };
 
 if (!Services.appinfo.inSafeMode) {
@@ -267,8 +314,7 @@ if (!Services.appinfo.inSafeMode) {
   let windows = Services.wm.getEnumerator(null);
   while (windows.hasMoreElements()) {
     let win = windows.getNext();
-    if (!('UC' in win))
-      UserChrome_js.load(win)
+    if (!('UC' in win)) UserChrome_js.load(win);
   }
   Services.obs.addObserver(UserChrome_js, 'chrome-document-global-created', false);
 }

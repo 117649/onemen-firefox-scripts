@@ -15,14 +15,19 @@ ChromeUtils.defineESModuleGetters(this, {
 });
 
 Services.obs.addObserver(doc => {
-  if (doc.location.protocol + doc.location.pathname === 'about:addons' ||
-      doc.location.protocol + doc.location.pathname === 'chrome:/content/extensions/aboutaddons.html') {
+  if (
+    doc.location.protocol + doc.location.pathname === 'about:addons' ||
+    doc.location.protocol + doc.location.pathname === 'chrome:/content/extensions/aboutaddons.html'
+  ) {
     const win = doc.defaultView;
     let handleEvent_orig = win.customElements.get('addon-card').prototype.handleEvent;
     win.customElements.get('addon-card').prototype.handleEvent = function (e) {
-      if (e.type === 'click' &&
-          e.target.getAttribute('action') === 'preferences' &&
-          this.addon.__AddonInternal__.optionsType == 1/*AddonManager.OPTIONS_TYPE_DIALOG*/ && !!this.addon.optionsURL) {
+      if (
+        e.type === 'click' &&
+        e.target.getAttribute('action') === 'preferences' &&
+        this.addon.__AddonInternal__.optionsType == 1 /*AddonManager.OPTIONS_TYPE_DIALOG*/ &&
+        !!this.addon.optionsURL
+      ) {
         var windows = Services.wm.getEnumerator(null);
         while (windows.hasMoreElements()) {
           var win2 = windows.getNext();
@@ -35,65 +40,83 @@ Services.obs.addObserver(doc => {
           }
         }
         var features = 'chrome,titlebar,toolbar,centerscreen';
-        win.docShell.rootTreeItem.domWindow.openDialog(this.addon.optionsURL, this.addon.id, features);
+        win.docShell.rootTreeItem.domWindow.openDialog(
+          this.addon.optionsURL,
+          this.addon.id,
+          features
+        );
       } else {
         handleEvent_orig.apply(this, arguments);
       }
-    }
+    };
     let update_orig = win.customElements.get('addon-options').prototype.update;
     win.customElements.get('addon-options').prototype.update = function (card, addon) {
       update_orig.apply(this, arguments);
-      if (addon.__AddonInternal__?.optionsType == 1/*AddonManager.OPTIONS_TYPE_DIALOG*/ && !!addon.optionsURL)
+      if (
+        addon.__AddonInternal__?.optionsType == 1 /*AddonManager.OPTIONS_TYPE_DIALOG*/ &&
+        !!addon.optionsURL
+      )
         this.querySelector('panel-item[data-l10n-id="preferences-addon-button"]').hidden = false;
-    }
+    };
   }
 }, 'chrome-document-loaded');
 
 const {AddonManager} = ChromeUtils.importESModule('resource://gre/modules/AddonManager.sys.mjs');
-const {XPIDatabase, AddonInternal} = ChromeUtils.importESModule('resource://gre/modules/addons/XPIDatabase.sys.mjs');
-const {XPIExports} = ChromeUtils.importESModule('resource://gre/modules/addons/XPIExports.sys.mjs')
+const {XPIDatabase, AddonInternal} = ChromeUtils.importESModule(
+  'resource://gre/modules/addons/XPIDatabase.sys.mjs'
+);
+const {XPIExports} = ChromeUtils.importESModule('resource://gre/modules/addons/XPIExports.sys.mjs');
 
 XPIDatabase.isDisabledLegacy = () => false;
 
 var orig_verifyBundleSignedState = XPIExports.verifyBundleSignedState;
 XPIExports.verifyBundleSignedState = async (aBundle, aAddon) => {
-  if(!aAddon.isWebExtension && aAddon.type === 'extension' || aAddon.id.includes('_N_SIGN_'))
-    return { signedState: undefined, signedTypes: [] };
+  if ((!aAddon.isWebExtension && aAddon.type === 'extension') || aAddon.id.includes('_N_SIGN_'))
+    return {signedState: undefined, signedTypes: []};
   return orig_verifyBundleSignedState(aBundle, aAddon);
-}
+};
 
 ChromeUtils.defineLazyGetter(this, 'BOOTSTRAP_REASONS', () => {
-  const {XPIProvider} = ChromeUtils.importESModule('resource://gre/modules/addons/XPIProvider.sys.mjs');
+  const {XPIProvider} = ChromeUtils.importESModule(
+    'resource://gre/modules/addons/XPIProvider.sys.mjs'
+  );
   return XPIProvider.BOOTSTRAP_REASONS;
 });
 
-ChromeUtils.defineLazyGetter(this, "logger", () => {
-  let { ConsoleAPI } = ChromeUtils.importESModule(
-    "resource://gre/modules/Console.sys.mjs"
-  );
+ChromeUtils.defineLazyGetter(this, 'logger', () => {
+  let {ConsoleAPI} = ChromeUtils.importESModule('resource://gre/modules/Console.sys.mjs');
   let consoleOptions = {
-     maxLogLevel: "all",
-     prefix: "BootstrapLoader",
+    maxLogLevel: 'all',
+    prefix: 'BootstrapLoader',
   };
   return new ConsoleAPI(consoleOptions);
 });
 
 const FileOutputStream = Components.Constructor(
-  "@mozilla.org/network/file-output-stream;1",
-  "nsIFileOutputStream",
-  "init"
+  '@mozilla.org/network/file-output-stream;1',
+  'nsIFileOutputStream',
+  'init'
 );
 
-/**
- * Valid IDs fit this pattern.
- */
-var gIDTest = /^(\{[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}|[a-z0-9-\._]*\@[a-z0-9-\._]+)$/i;
+/** Valid IDs fit this pattern. */
+var gIDTest =
+  // eslint-disable-next-line no-useless-escape
+  /^(\{[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}|[a-z0-9-\._]*\@[a-z0-9-\._]+)$/i;
 
 // Properties that exist in the install manifest
-const PROP_METADATA      = ['id', 'version', 'type', 'internalName', 'updateURL',
-                            'optionsURL', 'optionsType', 'aboutURL', 'iconURL'];
+const PROP_METADATA = [
+  'id',
+  'version',
+  'type',
+  'internalName',
+  'updateURL',
+  'optionsURL',
+  'optionsType',
+  'aboutURL',
+  'iconURL',
+];
 const PROP_LOCALE_SINGLE = ['name', 'description', 'creator', 'homepageURL'];
-const PROP_LOCALE_MULTI  = ['developers', 'translators', 'contributors'];
+const PROP_LOCALE_MULTI = ['developers', 'translators', 'contributors'];
 
 // Map new string type identifiers to old style nsIUpdateItem types.
 // Retired values:
@@ -124,20 +147,17 @@ function isXPI(filename) {
  * file. If aFile is a directory then this will return a file: URI, if it is an
  * XPI file then it will return a jar: URI.
  *
- * @param {nsIFile} aFile
- *        The file containing the resources, must be either a directory or an
- *        XPI file
- * @param {string} aPath
- *        The path to find the resource at, '/' separated. If aPath is empty
- *        then the uri to the root of the contained files will be returned
- * @returns {nsIURI}
- *        An nsIURI pointing at the resource
+ * @param {nsIFile} aFile The file containing the resources, must be either a
+ *   directory or an XPI file
+ * @param {string} aPath The path to find the resource at, '/' separated. If
+ *   aPath is empty then the uri to the root of the contained files will be
+ *   returned
+ * @returns {nsIURI} An nsIURI pointing at the resource
  */
 function getURIForResourceInFile(aFile, aPath) {
   if (!isXPI(aFile.leafName)) {
     let resource = aFile.clone();
-    if (aPath)
-      aPath.split('/').forEach(part => resource.append(part));
+    if (aPath) aPath.split('/').forEach(part => resource.append(part));
 
     return Services.io.newFileURI(resource);
   }
@@ -148,12 +168,9 @@ function getURIForResourceInFile(aFile, aPath) {
 /**
  * Creates a jar: URI for a file inside a ZIP file.
  *
- * @param {nsIFile} aJarfile
- *        The ZIP file as an nsIFile
- * @param {string} aPath
- *        The path inside the ZIP file
- * @returns {nsIURI}
- *        An nsIURI for the file
+ * @param {nsIFile} aJarfile The ZIP file as an nsIFile
+ * @param {string} aPath The path inside the ZIP file
+ * @returns {nsIURI} An nsIURI for the file
  */
 function buildJarURI(aJarfile, aPath) {
   let uri = Services.io.newFileURI(aJarfile);
@@ -166,20 +183,16 @@ var BootstrapLoader = {
   manifestFile: 'install.rdf',
   async loadManifest(pkg) {
     /**
-     * Reads locale properties from either the main install manifest root or
-     * an em:localized section in the install manifest.
+     * Reads locale properties from either the main install manifest root or an
+     * em:localized section in the install manifest.
      *
-     * @param {Object} aSource
-     *        The resource to read the properties from.
-     * @param {boolean} isDefault
-     *        True if the locale is to be read from the main install manifest
-     *        root
-     * @param {string[]} aSeenLocales
-     *        An array of locale names already seen for this install manifest.
-     *        Any locale names seen as a part of this function will be added to
-     *        this array
-     * @returns {Object}
-     *        an object containing the locale properties
+     * @param {Object} aSource The resource to read the properties from.
+     * @param {boolean} isDefault True if the locale is to be read from the main
+     *   install manifest root
+     * @param {string[]} aSeenLocales An array of locale names already seen for
+     *   this install manifest. Any locale names seen as a part of this function
+     *   will be added to this array
+     * @returns {Object} an object containing the locale properties
      */
     function readLocale(aSource, isDefault, aSeenLocales) {
       let locale = {};
@@ -239,15 +252,12 @@ var BootstrapLoader = {
     if (!(addon.type in TYPES))
       throw new Error('Install manifest specifies unknown type: ' + addon.type);
 
-    if (!addon.id)
-      throw new Error('No ID in install manifest');
-    if (!gIDTest.test(addon.id))
-      throw new Error('Illegal add-on ID ' + addon.id);
-    if (!addon.version)
-      throw new Error('No version in install manifest');
+    if (!addon.id) throw new Error('No ID in install manifest');
+    if (!gIDTest.test(addon.id)) throw new Error('Illegal add-on ID ' + addon.id);
+    if (!addon.version) throw new Error('No version in install manifest');
 
-    addon.strictCompatibility = (!(addon.type in COMPATIBLE_BY_DEFAULT_TYPES) ||
-                                 manifest.strictCompatibility == 'true');
+    addon.strictCompatibility =
+      !(addon.type in COMPATIBLE_BY_DEFAULT_TYPES) || manifest.strictCompatibility == 'true';
 
     // Only read these properties for extensions.
     if (addon.type == 'extension') {
@@ -255,15 +265,16 @@ var BootstrapLoader = {
         throw new Error('Non-restartless extensions no longer supported');
       }
 
-      if (addon.optionsType &&
-          addon.optionsType != 1/*AddonManager.OPTIONS_TYPE_DIALOG*/ &&
-          addon.optionsType != AddonManager.OPTIONS_TYPE_INLINE_BROWSER &&
-          addon.optionsType != AddonManager.OPTIONS_TYPE_TAB) {
-            throw new Error('Install manifest specifies unknown optionsType: ' + addon.optionsType);
+      if (
+        addon.optionsType &&
+        addon.optionsType != 1 /*AddonManager.OPTIONS_TYPE_DIALOG*/ &&
+        addon.optionsType != AddonManager.OPTIONS_TYPE_INLINE_BROWSER &&
+        addon.optionsType != AddonManager.OPTIONS_TYPE_TAB
+      ) {
+        throw new Error('Install manifest specifies unknown optionsType: ' + addon.optionsType);
       }
 
-      if (addon.optionsType)
-        addon.optionsType = parseInt(addon.optionsType);
+      if (addon.optionsType) addon.optionsType = parseInt(addon.optionsType);
     }
 
     addon.defaultLocale = readLocale(manifest, true);
@@ -272,8 +283,7 @@ var BootstrapLoader = {
     addon.locales = [];
     for (let localeData of manifest.localized || []) {
       let locale = readLocale(localeData, false, seenLocales);
-      if (locale)
-        addon.locales.push(locale);
+      if (locale) addon.locales.push(locale);
     }
 
     let dependencies = new Set(manifest.dependencies);
@@ -282,14 +292,14 @@ var BootstrapLoader = {
     let seenApplications = [];
     addon.targetApplications = [];
     for (let targetApp of manifest.targetApplications || []) {
-      if (!targetApp.id || !targetApp.minVersion ||
-          !targetApp.maxVersion) {
-            logger.warn('Ignoring invalid targetApplication entry in install manifest');
-            continue;
+      if (!targetApp.id || !targetApp.minVersion || !targetApp.maxVersion) {
+        logger.warn('Ignoring invalid targetApplication entry in install manifest');
+        continue;
       }
       if (seenApplications.includes(targetApp.id)) {
-        logger.warn('Ignoring duplicate targetApplication entry for ' + targetApp.id +
-                    ' in install manifest');
+        logger.warn(
+          'Ignoring duplicate targetApplication entry for ' + targetApp.id + ' in install manifest'
+        );
         continue;
       }
       seenApplications.push(targetApp.id);
@@ -334,12 +344,12 @@ var BootstrapLoader = {
 
     Object.defineProperty(addon, 'appDisabled', {
       set: _ => {},
-      get: _ => false
+      get: _ => false,
     });
 
     Object.defineProperty(addon, 'signedState', {
       set: _ => {},
-      get: _ => AddonManager.SIGNEDSTATE_NOT_REQUIRED
+      get: _ => AddonManager.SIGNEDSTATE_NOT_REQUIRED,
     });
 
     return addon;
@@ -354,14 +364,17 @@ var BootstrapLoader = {
       sandboxName: uri,
       addonId: addon.id,
       wantGlobalProperties: ['ChromeUtils'],
-      metadata: { addonID: addon.id, URI: uri },
+      metadata: {addonID: addon.id, URI: uri},
     });
 
     try {
       Object.assign(sandbox, BOOTSTRAP_REASONS);
 
-      ChromeUtils.defineLazyGetter(sandbox, 'console', () =>
-        new ConsoleAPI({ consoleID: `addon/${addon.id}` }));
+      ChromeUtils.defineLazyGetter(
+        sandbox,
+        'console',
+        () => new ConsoleAPI({consoleID: `addon/${addon.id}`})
+      );
 
       // prepare for bug 1974213 Don't allow file: and jar: schemes in Services.scriptloader.loadSubScript
       // https://bugzilla.mozilla.org/show_bug.cgi?id=1974213
@@ -370,7 +383,7 @@ var BootstrapLoader = {
         script.executeInGlobal(sandbox);
         block = false;
       });
-      Services.tm.spinEventLoopUntil("Waiting for bootstrap.js to load", () => !block);
+      Services.tm.spinEventLoopUntil('Waiting for bootstrap.js to load', () => !block);
     } catch (e) {
       logger.warn(`Error loading bootstrap.js for ${addon.id}`, e);
     }
@@ -383,7 +396,9 @@ var BootstrapLoader = {
       try {
         let method = Cu.evalInSandbox(name, sandbox);
         return method;
-      } catch (err) { }
+      } catch {
+        //
+      }
 
       return () => {
         logger.warn(`Add-on ${addon.id} is missing bootstrap method ${name}`);
@@ -414,9 +429,9 @@ var BootstrapLoader = {
           );
 
           const inputStream = channel.open();
-          const scriptableStream = Cc[
-            '@mozilla.org/scriptableinputstream;1'
-          ].createInstance(Ci.nsIScriptableInputStream);
+          const scriptableStream = Cc['@mozilla.org/scriptableinputstream;1'].createInstance(
+            Ci.nsIScriptableInputStream
+          );
           scriptableStream.init(inputStream);
 
           let data = '';
@@ -439,7 +454,7 @@ var BootstrapLoader = {
     function createManifestTemporarily(manifestText) {
       // we store the temporary file in the user's profile, in a subdirectory
       // analogous to webExtension's "browser-extension-data".
-      let manifest = Services.dirsvc.get('ProfD', Ci.nsIFile)
+      let manifest = Services.dirsvc.get('ProfD', Ci.nsIFile);
       manifest.append('legacy-extension-data');
       manifest.append(addon.id);
       manifest.exists() || manifest.create(Ci.nsIFile.DIRECTORY_TYPE, 0o755);
@@ -455,8 +470,8 @@ var BootstrapLoader = {
 
       return function () {
         if (manifest.exists()) {
-          manifest.parent.remove(/*recursive=*/true)
-        };
+          manifest.parent.remove(/*recursive=*/ true);
+        }
         Cc['@mozilla.org/chrome/chrome-registry;1']
           .getService(Ci.nsIXULChromeRegistry)
           .checkForNewChrome();
@@ -483,25 +498,33 @@ var BootstrapLoader = {
           const [manifestData, installData] = await Promise.all([
             readFromURI(manifestURI),
             readFromURI(installURI).catch(() => {}),
-          ])
-          const {name, version} = InstallRDF.loadFromString(installData).getProps(["name", "version"])
+          ]);
+          const {name, version} = InstallRDF.loadFromString(installData).getProps([
+            'name',
+            'version',
+          ]);
           if (name && version) {
             logger.debug(`Registering manifest for: ${name} version ${version}\n${file.path}\n`);
           } else {
             logger.debug(`Registering manifest for ${file.path}\n`);
           }
-          let chromeManifest = new ChromeManifest(() => {
-            return manifestData;
-          }, {
-            application: Services.appinfo.ID,
-            appversion: Services.appinfo.version,
-            platformversion: Services.appinfo.platformVersion,
-            os: Services.appinfo.OS,
-            osversion: Services.sysinfo.getProperty('version'),
-            abi: Services.appinfo.XPCOMABI
-          });
-          await chromeManifest.parse()
-          this._clearManifest = createManifestTemporarily(chromeManifest.toString(getURIForResourceInFile(file, '').spec));
+          let chromeManifest = new ChromeManifest(
+            () => {
+              return manifestData;
+            },
+            {
+              application: Services.appinfo.ID,
+              appversion: Services.appinfo.version,
+              platformversion: Services.appinfo.platformVersion,
+              os: Services.appinfo.OS,
+              osversion: Services.sysinfo.getProperty('version'),
+              abi: Services.appinfo.XPCOMABI,
+            }
+          );
+          await chromeManifest.parse();
+          this._clearManifest = createManifestTemporarily(
+            chromeManifest.toString(getURIForResourceInFile(file, '').spec)
+          );
         }
         return startup(...args);
       },
@@ -509,8 +532,6 @@ var BootstrapLoader = {
       shutdown(data, reason) {
         try {
           return shutdown(data, reason);
-        } catch (err) {
-          throw err;
         } finally {
           if (reason != BOOTSTRAP_REASONS.APP_SHUTDOWN) {
             logger.debug(`Removing manifest for ${file.path}\n`);
@@ -530,7 +551,7 @@ if (AddonManager.isReady) {
     addons.forEach(addon => {
       if (addon.type == 'extension' && !addon.isWebExtension && !addon.userDisabled) {
         addon.reload();
-      };
+      }
     });
   });
 }

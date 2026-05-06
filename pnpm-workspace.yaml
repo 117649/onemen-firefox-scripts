@@ -1,0 +1,13 @@
+autoInstallPeers: true
+saveExact: true
+minimumReleaseAge: 7200
+minimumReleaseAgeExclude:
+  - 'typescript'
+  - 'typescript-eslint'
+  - '@typescript-eslint/*'
+  - '@typescript/native-preview*'
+
+trustPolicy: no-downgrade
+
+trustPolicyExclude:
+  - semver@6.3.1
