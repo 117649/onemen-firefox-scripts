@@ -10,8 +10,7 @@ ChromeUtils.defineESModuleGetters(this, {
   Blocklist: 'resource://gre/modules/Blocklist.sys.mjs',
   ConsoleAPI: 'resource://gre/modules/Console.sys.mjs',
   InstallRDF: 'chrome://userchromejs/content/RDFManifestConverter.sys.mjs',
-  getNameFromRDF: 'chrome://userchromejs/content/getNameFromRDF.sys.mjs',
-  ChromeManifest: 'chrome://userchromejs/content/ChromeManifest.sys.mjs',
+  NetUtil: 'resource://gre/modules/NetUtil.sys.mjs',
 });
 
 Services.obs.addObserver(doc => {
@@ -91,12 +90,6 @@ ChromeUtils.defineLazyGetter(this, 'logger', () => {
   };
   return new ConsoleAPI(consoleOptions);
 });
-
-const FileOutputStream = Components.Constructor(
-  '@mozilla.org/network/file-output-stream;1',
-  'nsIFileOutputStream',
-  'init'
-);
 
 /** Valid IDs fit this pattern. */
 var gIDTest =
@@ -378,12 +371,12 @@ var BootstrapLoader = {
 
       // prepare for bug 1974213 Don't allow file: and jar: schemes in Services.scriptloader.loadSubScript
       // https://bugzilla.mozilla.org/show_bug.cgi?id=1974213
-      let block = true;
+      let isDone = false;
       ChromeUtils.compileScript(uri).then(script => {
         script.executeInGlobal(sandbox);
-        block = false;
+        isDone = true;
       });
-      Services.tm.spinEventLoopUntil('Waiting for bootstrap.js to load', () => !block);
+      Services.tm.spinEventLoopUntil('Waiting for bootstrap.js to load', () => isDone);
     } catch (e) {
       logger.warn(`Error loading bootstrap.js for ${addon.id}`, e);
     }
@@ -413,68 +406,83 @@ var BootstrapLoader = {
     /**
      * Reads content from a jar/folder URI
      *
-     * @param {nsIURI} uri - The jar/folder URI to read from
-     * @returns {Promise<string>} The content of the file inside the jar/folder
+     * @param {nsIURI} jarURI - The jar/folder URI to read from
+     * @returns {string} The content of the file inside the JAR
      */
-    async function readFromURI(uri) {
-      return new Promise((resolve, reject) => {
-        try {
-          const channel = Services.io.newChannelFromURI(
-            uri,
-            null,
-            Services.scriptSecurityManager.getSystemPrincipal(),
-            null,
-            Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_SEC_CONTEXT_IS_NULL,
-            Ci.nsIContentPolicy.TYPE_OTHER
-          );
+    function readFromJarURI(jarURI) {
+      const input = Services.io
+        .newChannelFromURI(
+          jarURI,
+          null,
+          Services.scriptSecurityManager.getSystemPrincipal(),
+          null,
+          Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_SEC_CONTEXT_IS_NULL,
+          Ci.nsIContentPolicy.TYPE_OTHER
+        )
+        .open();
 
-          const inputStream = channel.open();
-          const scriptableStream = Cc['@mozilla.org/scriptableinputstream;1'].createInstance(
-            Ci.nsIScriptableInputStream
-          );
-          scriptableStream.init(inputStream);
+      const data = NetUtil.readInputStreamToString(input, input.available(), {charset: 'UTF-8'});
+      input.close();
+      return data;
+    }
 
-          let data = '';
-          let available = 0;
-          while ((available = scriptableStream.available()) > 0) {
-            data += scriptableStream.read(available);
-          }
+    function absolutizePaths(file, line) {
+      const manifestMethodPathLocation = {
+        component: 2, // component classid uri/to/files/ [flags]
+        contract: 2, // contract contractid uri/to/files/ [flags]
+        content: 2, // content shortname uri/to/files/ [flags]
+        locale: 3, // locale shortname localename uri/to/files/ [flags]
+        skin: 3, // skin shortname skinname uri/to/files/ [flags]
+        resource: 2, // resource packagename uri/to/files/ [flags]
+        overlay: 2, // overlay targetUrl uri/to/files/ [flags]
+        style: 2, // style uri uri/to/files/ [flags]
+      };
+      const isRelative = loc => {
+        // Not absolute if doesn't start with \, or protocol (chrome://, resource://, etc)
+        return typeof loc === 'string' && !loc.match(/^(?:[a-zA-Z]+:|\\)/);
+      };
 
-          scriptableStream.close();
-          inputStream.close();
-          resolve(data);
-        } catch (e) {
-          reject(e);
-        }
-      });
+      let words = line.trim().split(/\s+/);
+      const index = manifestMethodPathLocation[words[0]];
+
+      if (index && isRelative(words[index])) {
+        words[index] = getURIForResourceInFile(file, words[index]).spec;
+        line = words.join(' ');
+      }
+
+      return line;
     }
 
     // Register a chrome manifest temporarily and return a function which un-does
     // the registrarion when no longer needed.
+    let tempDir = Services.dirsvc.get('ProfD', Ci.nsIFile);
+    tempDir.append('browser-extension-data');
+    tempDir.append(addon.id);
+
     function createManifestTemporarily(manifestText) {
-      // we store the temporary file in the user's profile, in a subdirectory
-      // analogous to webExtension's "browser-extension-data".
-      let manifest = Services.dirsvc.get('ProfD', Ci.nsIFile);
-      manifest.append('legacy-extension-data');
-      manifest.append(addon.id);
-      manifest.exists() || manifest.create(Ci.nsIFile.DIRECTORY_TYPE, 0o755);
-      manifest.append('chrome.manifest'); /* created or truncated by ostream */
+      let tempFile = tempDir.clone();
+      tempFile.append('chrome.manifest');
+      tempFile.exists();
 
-      // write modified chrome.manifest to profile directory
-      let ostream = new FileOutputStream(manifest, -1, -1, 0);
-      ostream.write(manifestText, manifestText.length);
-      ostream.close();
+      let foStream = Cc['@mozilla.org/network/file-output-stream;1'].createInstance(
+        Ci.nsIFileOutputStream
+      );
+      foStream.init(tempFile, 0x02 | 0x08 | 0x20, 0o664, 0); // write, create, truncate
+      foStream.write(manifestText, manifestText.length);
+      foStream.close();
 
-      // let Firefox read and parse it
-      Components.manager.QueryInterface(Ci.nsIComponentRegistrar).autoRegister(manifest);
+      Components.manager.QueryInterface(Ci.nsIComponentRegistrar).autoRegister(tempFile);
+
+      Cc['@mozilla.org/chrome/chrome-registry;1']
+        .getService(Ci.nsIXULChromeRegistry)
+        .checkForNewChrome();
 
       return function () {
-        if (manifest.exists()) {
-          manifest.parent.remove(/*recursive=*/ true);
-        }
+        tempFile.fileSize = 0; // truncate the manifest
         Cc['@mozilla.org/chrome/chrome-registry;1']
           .getService(Ci.nsIXULChromeRegistry)
           .checkForNewChrome();
+        tempFile.remove(false);
       };
     }
 
@@ -491,14 +499,10 @@ var BootstrapLoader = {
         Services.obs.notifyObservers(null, 'startupcache-invalidate');
       },
 
-      async startup(...args) {
+      startup(...args) {
         if (addon.type == 'extension') {
-          const manifestURI = getURIForResourceInFile(file, 'chrome.manifest');
-          const installURI = getURIForResourceInFile(file, 'install.rdf');
-          const [manifestData, installData] = await Promise.all([
-            readFromURI(manifestURI),
-            readFromURI(installURI).catch(() => {}),
-          ]);
+          let installURI = getURIForResourceInFile(file, 'install.rdf');
+          let installData = readFromJarURI(installURI);
           const {name, version} = InstallRDF.loadFromString(installData).getProps([
             'name',
             'version',
@@ -508,23 +512,13 @@ var BootstrapLoader = {
           } else {
             logger.debug(`Registering manifest for ${file.path}\n`);
           }
-          let chromeManifest = new ChromeManifest(
-            () => {
-              return manifestData;
-            },
-            {
-              application: Services.appinfo.ID,
-              appversion: Services.appinfo.version,
-              platformversion: Services.appinfo.platformVersion,
-              os: Services.appinfo.OS,
-              osversion: Services.sysinfo.getProperty('version'),
-              abi: Services.appinfo.XPCOMABI,
-            }
-          );
-          await chromeManifest.parse();
-          this._clearManifest = createManifestTemporarily(
-            chromeManifest.toString(getURIForResourceInFile(file, '').spec)
-          );
+          let manifestURI = getURIForResourceInFile(file, 'chrome.manifest');
+          let manifestData = readFromJarURI(manifestURI);
+          let chromeManifest = manifestData
+            .split('\n')
+            .map(absolutizePaths.bind(null, file))
+            .join('\n');
+          this._clearManifest = createManifestTemporarily(chromeManifest);
         }
         return startup(...args);
       },
