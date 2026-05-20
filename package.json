@@ -10,13 +10,6 @@
   "keywords": [],
   "author": "ONEMEN <tabmix.onemen@gmail.com> (https://github.com/onemen)",
   "license": "MIT",
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "^11.0.6",
-      "onFail": "download"
-    }
-  },
   "type": "module",
   "devDependencies": {
     "@eslint/js": "10.0.1",
