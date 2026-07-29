@@ -70,11 +70,7 @@ const _uc = {
     return (this.scripts[filename] = {
       filename: filename,
       file: aFile,
-      url:
-        Services.io
-          .getProtocolHandler('file')
-          .QueryInterface(Ci.nsIFileProtocolHandler)
-          .getURLSpecFromDir(this.chromedir) + filename,
+      url: 'resource://userchromejs/' + filename,
       name: (header.match(/\/\/ @name\s+(.+)\s*$/im) || def)[1],
       description: (header.match(/\/\/ @description\s+(.+)\s*$/im) || def)[1],
       version: (header.match(/\/\/ @version\s+(.+)\s*$/im) || def)[1],
