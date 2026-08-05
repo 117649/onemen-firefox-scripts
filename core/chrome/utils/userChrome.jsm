@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 let EXPORTED_SYMBOLS = [];
 
 const { xPref } = ChromeUtils.import('chrome://userchromejs/content/xPref.jsm');
@@ -95,7 +99,7 @@ let _uc = {
   },
 
   everLoaded: [],
-  
+
   loadScript: function (script, win) {
     if (!script.regex.test(win.location.href) || (script.filename != this.ALWAYSEXECUTE && !script.isEnabled)) {
       return;
