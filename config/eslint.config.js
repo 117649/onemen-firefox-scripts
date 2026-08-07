@@ -38,6 +38,8 @@ export default defineConfig([
         USE_RDFNS_ATTR: 'readonly',
         _uc: 'readonly',
         logger: 'readonly',
+        lockPref: 'readonly',
+        pref: 'readonly',
         RDF_R: 'readonly',
         UC: 'readonly',
         xPref: 'readonly',
