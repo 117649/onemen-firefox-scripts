@@ -1,0 +1,81 @@
+name: CI
+
+# Actions are pinned to full commit SHAs (supply-chain hardening — mutable
+# major-version tags can be silently retagged).  The tag each SHA tracks is in
+# a trailing comment; `.github/dependabot.yml` refreshes the SHAs.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # Fast static gate: eslint (incl. security plugin) + prettier + clang-format
+  # + the gcc -fanalyzer C analysis.  Runs on every PR and on main pushes.
+  checks:
+    name: lint + format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 9
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm format
+
+  # Publish-path gate: `upload:local --mode=dev` rebuilds the zips and the
+  # native binaries for the runner's OS.  This is what catches regressions in
+  # the generated files, hashes and Makefile before they reach a release.
+  build:
+    name: publish gate — ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          version: 9
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Set up MSYS2 toolchain (make + gcc)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc make
+
+      - name: Build all packages and binaries
+        shell: bash
+        run: pnpm upload:local --mode=dev
+
+      # Security regression gate: every state-changing /api route must reject
+      # a missing/wrong session token, and no response may carry the wildcard
+      # Access-Control-Allow-Origin header.  Windows only: it drives the win
+      # binary; the same gate logic is covered on other OSes by review.
+      - name: Security smoke test — installer API
+        if: runner.os == 'Windows'
+        shell: bash
+        run: node tools/test/smoke-security.mjs
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist-${{ matrix.os }}
+          path: dist/
+          if-no-files-found: error
