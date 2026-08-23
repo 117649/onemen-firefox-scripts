@@ -107,46 +107,98 @@ export function extractZip(zipPath, destDir) {
   return destDir;
 }
 
-// ── Firefox binary discovery ───────────────────────────────────────────────
+// ── Firefox-family binary discovery ─────────────────────────────────────────
+
+/** RUNTIME_BROWSER env: force a specific browser to test. */
+export function targetBrowserName() {
+  return process.env.RUNTIME_BROWSER || process.env.FIREFOX_FAMILY || '';
+}
+
+/** Known Firefox-family browsers and their per-OS binary paths. */
+export const BROWSERS = {
+  'firefox': {
+    win: ['Mozilla Firefox', 'firefox.exe'],
+    mac: ['Firefox.app'],
+    linux: ['firefox'],
+    choco: 'firefox',
+  },
+  'firefox-dev': {
+    win: ['Firefox Developer Edition', 'firefox.exe'],
+    mac: ['Firefox Developer Edition.app'],
+    linux: ['firefox-developer-edition'],
+    choco: 'firefox-dev',
+  },
+  'waterfox': {
+    win: ['Waterfox', 'waterfox.exe'],
+    mac: ['Waterfox.app'],
+    linux: ['waterfox'],
+    choco: null, // manual install only
+  },
+  'zen': {
+    win: ['Zen Browser', 'zen.exe'],
+    mac: ['Zen Browser.app'],
+    linux: ['zen-browser'],
+    choco: null,
+  },
+  'librewolf': {
+    win: ['LibreWolf', 'librewolf.exe'],
+    mac: ['LibreWolf.app'],
+    linux: ['librewolf'],
+    choco: 'librewolf',
+  },
+  'floorp': {
+    win: ['Floorp', 'floorp.exe'],
+    mac: ['Floorp.app'],
+    linux: ['floorp'],
+    choco: 'floorp',
+  },
+};
 
 /** Auto-detect a Firefox-family binary for the current OS. */
 export function discoverFirefoxBinary() {
   if (process.env.FIREFOX_BINARY && fs.existsSync(process.env.FIREFOX_BINARY)) {
     return process.env.FIREFOX_BINARY;
   }
-  // This stack's auto-discovery only knows Firefox locations. A named
-  // non-Firefox browser must come from an explicit path, or the run would
-  // silently test Firefox under the wrong label (multi-browser discovery
-  // lands with the browser-matrix PR).
-  const runtime = process.env.RUNTIME_BROWSER;
-  if (runtime && runtime !== 'firefox') {
-    throw new Error(
-      `RUNTIME_BROWSER=${runtime}: no auto-discovery for this browser yet — ` +
-        'pass --firefox / FIREFOX_BINARY explicitly'
-    );
-  }
+
+  const target = targetBrowserName();
+
   if (process.platform === 'win32') {
-    const candidates = [
-      path.join(process.env.LOCALAPPDATA || '', 'Mozilla Firefox', 'firefox.exe'),
-      path.join(process.env.LOCALAPPDATA || '', 'Firefox Developer Edition', 'firefox.exe'),
-      'C:\\Program Files\\Mozilla Firefox\\firefox.exe',
-      'C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe',
-    ];
+    const candidates = [];
+    for (const [key, b] of Object.entries(BROWSERS)) {
+      if (target && key !== target) continue;
+      const [dir, exe] = b.win;
+      candidates.push(
+        path.join(process.env.LOCALAPPDATA || '', dir, exe),
+        path.join('C:\\Program Files', dir, exe),
+        path.join('C:\\Program Files (x86)', dir, exe)
+      );
+    }
     return candidates.find(p => fs.existsSync(p)) || null;
   }
   if (process.platform === 'darwin') {
-    const candidates = [
-      '/Applications/Firefox.app/Contents/MacOS/firefox',
-      '/Applications/Firefox Developer Edition.app/Contents/MacOS/firefox',
-    ];
+    const candidates = [];
+    for (const [key, b] of Object.entries(BROWSERS)) {
+      if (target && key !== target) continue;
+      const name = b.mac.replace('.app', '');
+      candidates.push(
+        `/Applications/${b.mac}/Contents/MacOS/${name.toLowerCase()}`,
+        `/Applications/${b.mac}/Contents/MacOS/${name}`,
+        `/Applications/${b.mac}/Contents/MacOS/firefox`
+      );
+    }
     return candidates.find(p => fs.existsSync(p)) || null;
   }
-  const candidates = [
-    '/usr/bin/firefox',
-    '/usr/bin/firefox-esr',
-    '/snap/bin/firefox',
-    '/opt/firefox/firefox',
-  ];
+  // Linux: /usr/bin is the typical symlink target.  Include legacy paths
+  // (firefox-esr, snap) that were supported before the BROWSERS registry.
+  const candidates = [];
+  for (const [key, b] of Object.entries(BROWSERS)) {
+    if (target && key !== target) continue;
+    candidates.push(`/usr/bin/${b.linux}`, `/opt/${b.linux}/${b.linux}`);
+  }
+  // Fallback paths not covered by BROWSERS entries
+  if (!target || target === 'firefox') {
+    candidates.push('/usr/bin/firefox-esr', '/snap/bin/firefox');
+  }
   return candidates.find(p => fs.existsSync(p)) || null;
 }
 

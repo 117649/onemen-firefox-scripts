@@ -164,3 +164,68 @@ jobs:
             dist/updater-e2e-*.png
             dist/installer-e2e-*.png
           if-no-files-found: ignore
+
+  # ── Browser matrix (advisory, Windows) ────────────────────────────────────
+  # LibreWolf is on chocolatey. Floorp via winget.
+  # Firefox Dev Edition, Waterfox, and Zen require manual install.
+  browser-matrix:
+    name: 'updater E2E · ${{ matrix.browser }} · windows-latest'
+    runs-on: windows-latest
+    continue-on-error: true # advisory until validated
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [librewolf, floorp]
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 9
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install ${{ matrix.browser }} (choco)
+        if: matrix.browser == 'librewolf'
+        run: choco install librewolf -y --no-progress
+
+      - name: Install ${{ matrix.browser }} (winget)
+        if: matrix.browser == 'floorp'
+        run: winget install Ablaze.Floorp --accept-package-agreements --accept-source-agreements
+
+      - name: Locate ${{ matrix.browser }} binary
+        run: |
+          # Search Program Files first (real install, not choco shim) —
+          # Get-Command may resolve the chocolatey shim, whose dir is not GreD.
+          $exe = $null
+          $dirs = @("$env:ProgramFiles", "${env:ProgramFiles(x86)}", "$env:LOCALAPPDATA")
+          foreach ($d in $dirs) {
+            $found = Get-ChildItem "$d" -Recurse -Name "${{ matrix.browser }}.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $exe = Join-Path $d $found; break }
+          }
+          # Fallback: PATH shim (winget-installed Floorp may only have this)
+          if (-not $exe) {
+            $exe = Get-Command ${{ matrix.browser }}.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
+          }
+          if (-not $exe) { Write-Error "${{ matrix.browser }}.exe not found"; exit 1 }
+          Write-Host "Found: $exe"
+          & $exe --version
+          "FIREFOX_BINARY=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build snapshot
+        run: pnpm upload:local --mode=dev
+
+      - name: Run updater E2E
+        run: node tools/test/e2e/updater-e2e.mjs
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-diagnostics-${{ matrix.browser }}
+          path: dist/updater-e2e-*.png
+          if-no-files-found: ignore
