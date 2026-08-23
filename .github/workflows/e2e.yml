@@ -84,10 +84,10 @@ jobs:
           rm /tmp/test_src.txt
 
   # ── Updater E2E ────────────────────────────────────────────────────────────
+  # Every OS leg is required; the updater must work across the supported matrix.
   updater:
     name: 'updater E2E · ${{ matrix.os }}'
     runs-on: ${{ matrix.os }}
-    continue-on-error: true # advisory until validated across the matrix
     strategy:
       fail-fast: false
       matrix:
@@ -171,7 +171,6 @@ jobs:
   browser-matrix:
     name: 'updater E2E · ${{ matrix.browser }} · windows-latest'
     runs-on: windows-latest
-    continue-on-error: true # advisory until validated
     strategy:
       fail-fast: false
       matrix:
@@ -207,11 +206,10 @@ jobs:
             $found = Get-ChildItem "$d" -Recurse -Name "${{ matrix.browser }}.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($found) { $exe = Join-Path $d $found; break }
           }
-          # Fallback: PATH shim (winget-installed Floorp may only have this)
-          if (-not $exe) {
-            $exe = Get-Command ${{ matrix.browser }}.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
-          }
-          if (-not $exe) { Write-Error "${{ matrix.browser }}.exe not found"; exit 1 }
+          # Do not use PATH shims or app-execution aliases: their parent
+          # directory is not the browser's GreD, so seeded config would be
+          # written to the wrong location. Fail clearly instead.
+          if (-not $exe) { Write-Error "Real ${{ matrix.browser }}.exe not found under an install directory"; exit 1 }
           Write-Host "Found: $exe"
           & $exe --version
           "FIREFOX_BINARY=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append
@@ -229,3 +227,25 @@ jobs:
           name: e2e-diagnostics-${{ matrix.browser }}
           path: dist/updater-e2e-*.png
           if-no-files-found: ignore
+
+  # ── E2E gate ─────────────────────────────────────────────────────────────
+  # Single branch-protection check. Every upstream job is a hard gate, so a
+  # green aggregate check cannot hide a failed, cancelled, or skipped matrix leg.
+  e2e-gate:
+    name: E2E gate
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [installer, helper, updater, browser-matrix]
+    steps:
+      - name: Verify all E2E jobs
+        run: |
+          fail() { echo "::error::$1: $2"; exit 1; }
+          ok()   { echo "$1: $2 (OK)"; }
+          verify() {
+            case "$2" in success) ok "$1" "$2" ;; *) fail "$1" "$2" ;; esac
+          }
+          verify 'installer' '${{ needs.installer.result }}'
+          verify 'helper' '${{ needs.helper.result }}'
+          verify 'updater' '${{ needs.updater.result }}'
+          verify 'browser-matrix' '${{ needs.browser-matrix.result }}'
+          echo 'All E2E jobs passed'
