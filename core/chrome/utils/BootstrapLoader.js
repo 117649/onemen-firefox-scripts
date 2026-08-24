@@ -396,11 +396,19 @@ const BootstrapLoader = {
       // prepare for bug 1974213 Don't allow file: and jar: schemes in Services.scriptloader.loadSubScript
       // https://bugzilla.mozilla.org/show_bug.cgi?id=1974213
       let isDone = false;
-      ChromeUtils.compileScript(uri).then(script => {
-        script.executeInGlobal(sandbox);
-        isDone = true;
-      });
+      let loadError;
+      let loadFailed = false;
+      ChromeUtils.compileScript(uri)
+        .then(script => script.executeInGlobal(sandbox))
+        .catch(error => {
+          loadError = error;
+          loadFailed = true;
+        })
+        .finally(() => {
+          isDone = true;
+        });
       Services.tm.spinEventLoopUntil('Waiting for bootstrap.js to load', () => isDone);
+      if (loadFailed) throw loadError;
     } catch (e) {
       logger.warn(`Error loading bootstrap.js for ${addon.id}`, e);
     }
