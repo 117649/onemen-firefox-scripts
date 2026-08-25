@@ -4,6 +4,15 @@
 
 'use strict';
 
+// Reads platformVersion (Gecko) rather than version so forks (Waterfox,
+// LibreWolf, Floorp, Zen) that carry their own brand version still get the
+// correct Gecko-level semantics.
+function isFirefox149Plus(appinfo) {
+  const major = parseInt(String(appinfo && appinfo.platformVersion), 10);
+  return Number.isInteger(major) && major >= 149;
+}
+const FF149 = isFirefox149Plus(Services.appinfo);
+
 ChromeUtils.defineESModuleGetters(this, {
   xPref: 'chrome://userchromejs/content/xPref.sys.mjs',
   Management: 'resource://gre/modules/Extension.sys.mjs',
@@ -206,6 +215,10 @@ const _uc = {
     }
   },
 
+  // Bug 2008041 — Make XUL disabled / checked attributes html-style boolean
+  // attributes (https://bugzilla.mozilla.org/show_bug.cgi?id=2008041).
+  // Firefox 149+ evaluates boolean attrs by presence: toggleAttribute
+  // instead of setAttribute for boolean / 'true' / 'false' values.
   createElement: function (doc, tag, atts, XUL = true) {
     const el = XUL ? doc.createXULElement(tag) : doc.createElement(tag);
     for (const att in atts) {
@@ -216,6 +229,11 @@ const _uc = {
             Cu.evalInSandbox(`(function(event){${atts[att]}})`, this.getSandbox(doc))
           : atts[att]
         );
+      else if (
+        FF149 &&
+        (typeof atts[att] === 'boolean' || atts[att] === 'true' || atts[att] === 'false')
+      )
+        el.toggleAttribute(att, atts[att] === true || atts[att] === 'true');
       else el.setAttribute(att, atts[att]);
     }
     return el;
