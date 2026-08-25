@@ -34,6 +34,7 @@ import {
   tempDir,
   rmDir,
   summary,
+  localConfigOverrides,
 } from './helpers.mjs';
 import {findSnapshot, findZip, extractZip, discoverFirefoxBinary, findGreDir} from './browsers.mjs';
 
@@ -178,6 +179,13 @@ function seedProfile(
   if (utilsZip) {
     extractZip(utilsZip, chromeUtils);
   }
+
+  // Cross-OS snapshot sharing: when the snapshot was built elsewhere its baked
+  // file:// URLs point at the builder's dist dir. Repoint them at THIS
+  // machine's snapshot via pref overrides (never by rewriting the config — it
+  // is part of the hashed utils file set). No-op when the paths already match.
+  // Runs after the utils extract so the generated config file exists.
+  Object.assign(prefs, localConfigOverrides(chromeUtils, snapshotDir));
 
   // Force utils stale by changing a valid, non-startup module. Deleting a
   // shipped module can prevent the scheduler from running at all, which would
