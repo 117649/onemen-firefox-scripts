@@ -11,7 +11,7 @@
  *    mode, so it detects the browser), navigates to the web UI, and asserts
  *    cards render with expected statuses.
  *
- * Usage: node tools/test/e2e/installer-e2e.mjs --snapshot <dir> [--ui] pnpm
+ * Usage: node test/e2e/installer/installer-e2e.mjs --snapshot <dir> [--ui] pnpm
  * test:e2e:installer -- [--ui]
  */
 
@@ -28,8 +28,8 @@ import {
   screenshotPrivileged,
   tempDir,
   summary,
-} from './helpers.mjs';
-import {findSnapshot, discoverFirefoxBinary} from './browsers.mjs';
+} from '../shared/helpers.mjs';
+import {findSnapshot, discoverFirefoxBinary} from '../shared/browsers.mjs';
 
 const PORT = 8777;
 const BASE = `http://127.0.0.1:${PORT}`;

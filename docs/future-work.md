@@ -10,8 +10,8 @@ Each section links to its tracking issue under the
 ## 1. Updater end-to-end test list
 
 The updater UI is now a shipped package (`updater-ui.zip` → `chrome/utils/updater/ui`), updated by
-`scriptsUpdater.sys.mjs` (`ensureUpdaterUi`) before the tab opens. The E2E suite in
-`tools/test/e2e/` (`pnpm test:e2e`) automates the installer and updater flows on CI.
+`scriptsUpdater.sys.mjs` (`ensureUpdaterUi`) before the tab opens. The E2E suite in `test/e2e/`
+(`pnpm test:e2e`) automates the installer and updater flows on CI.
 
 > **Note:** §1.1–§1.4 describe the desired test coverage. Many are already implemented in the E2E
 > suite on `main`; the remaining gaps are tracked as individual checklist items. §1.5 (Firefox 155
@@ -87,11 +87,11 @@ manually.
 
 | Scenario                      | Browser dir                        | Expectation                                                                     |
 | ----------------------------- | ---------------------------------- | ------------------------------------------------------------------------------- |
-| Portable / user-owned install | e.g. `D:\firefox`                  | Direct `IOUtils.copy` — no helper, no UAC.                                      |
+| Portable / user-owned install | e.g. `D:\firefox`                  | Direct `IOUtils.copy` — no helper, no UAC. (automation tracked in #56)          |
 | Standard Windows install      | `C:\Program Files\Mozilla Firefox` | Direct copy fails → elevated-copy helper → exactly one UAC prompt → files land. |
 | Elevation cancelled           | —                                  | Helper exits `2` → tab shows "elevation cancelled", nothing written.            |
 | Linux (deb/rpm)               | `/usr/lib/firefox`                 | `pkexec` prompt once (fallback `sudo`).                                         |
-| Linux snap                    | `/etc/firefox` (per docs)          | **open**: GreD differs from the documented target — verify actual path.         |
+| Linux snap                    | `/etc/firefox` (per docs)          | **open**: GreD differs from the documented target — verify actual path (#55).   |
 | macOS                         | `Firefox.app/Contents/Resources`   | `osascript` prompt once.                                                        |
 
 ### 2.2 Automated (planned, tool undecided)

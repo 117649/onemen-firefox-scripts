@@ -17,7 +17,7 @@
  * force desired state → launch Firefox → wait for tab (or assert none) → run
  * assertions → close.
  *
- * Usage: node tools/test/e2e/updater-e2e.mjs --firefox <path> --snapshot <dir>
+ * Usage: node test/e2e/updater/updater-e2e.mjs --firefox <path> --snapshot<dir>
  */
 
 import fs from 'node:fs';
@@ -35,8 +35,14 @@ import {
   rmDir,
   summary,
   localConfigOverrides,
-} from './helpers.mjs';
-import {findSnapshot, findZip, extractZip, discoverFirefoxBinary, findGreDir} from './browsers.mjs';
+} from '../shared/helpers.mjs';
+import {
+  findSnapshot,
+  findZip,
+  extractZip,
+  discoverFirefoxBinary,
+  findGreDir,
+} from '../shared/browsers.mjs';
 
 const UPDATER_URL = 'chrome://firefox-scripts/content/ui/updater.html';
 const FORCE_UTILS_STALE = 'RDFDataSource.sys.mjs';
