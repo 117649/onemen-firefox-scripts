@@ -375,15 +375,35 @@ function dumpConsoleLog(profileDir) {
   }
 }
 
-/** True when the probe's watcher has recorded TAB_OPENED in the mirror log. */
-function mirrorSaysTabOpened(profileDir) {
+/** True when the probe's mirror log contains the given marker. */
+function mirrorHasMarker(profileDir, marker) {
   try {
-    return fs
-      .readFileSync(path.join(profileDir, 'e2e-console.log'), 'utf-8')
-      .includes('TAB_OPENED');
+    return fs.readFileSync(path.join(profileDir, 'e2e-console.log'), 'utf-8').includes(marker);
   } catch {
     return false;
   }
+}
+
+/** True when the probe's watcher has recorded TAB_OPENED in the mirror log. */
+function mirrorSaysTabOpened(profileDir) {
+  return mirrorHasMarker(profileDir, 'TAB_OPENED');
+}
+
+/**
+ * Resolve once BiDi reports at least one open page — the main browser window is
+ * up, so the scheduler (which needs the window) has made its decision.
+ */
+async function waitForFirstPage(browser, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      if ((await browser.pages()).length > 0) return true;
+    } catch {
+      /* browser not ready yet */
+    }
+    await new Promise(r => setTimeout(r, 250));
+  }
+  return false;
 }
 
 /**
@@ -649,8 +669,18 @@ async function runNoTabScenario(
       extraPrefsFirefox: seeded.prefs,
     });
     attachProcessLogging(browser, label);
-    // No-tab scenarios assert absence: 10 s is enough for startup to finish.
-    const page = await findPageByUrl(browser, UPDATER_URL, 10_000);
+    // No-tab scenarios assert absence. The scheduler runs at startup and
+    // decides within a couple of seconds of the window being up (manifest
+    // fetch + hash). Wait for the main window via BiDi page enumeration,
+    // allow a short margin for the async check to complete, then assert the
+    // tab never appeared. No blind fixed wait. (The GreD config probe cannot
+    // be used here: it changes config.js, which breaks the fx-folder hash and
+    // makes the scheduler open the tab.)
+    const browserReady = await waitForFirstPage(browser, 15_000);
+    check(counter, browserReady, `browser ready (${label})`, 'BiDi did not report an open page');
+    if (!browserReady) return seeded.profileDir;
+    await new Promise(r => setTimeout(r, 3_000));
+    const page = await findPageByUrl(browser, UPDATER_URL, 2_000);
     check(counter, !page, `tab does NOT open (${label})`);
     return seeded.profileDir;
   } finally {
