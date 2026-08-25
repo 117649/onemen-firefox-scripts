@@ -42,15 +42,7 @@ jobs:
     name: build windows dev snapshot
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-        with:
-          version: 11
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - uses: $/.github/actions/setup-repo
 
       - name: Build snapshot
         run: pnpm upload:local --mode=dev
@@ -72,15 +64,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-        with:
-          version: 11
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - uses: $/.github/actions/setup-repo
 
       - name: Build snapshot
         run: pnpm upload:local --mode=dev
@@ -98,15 +82,7 @@ jobs:
         os: [ubuntu-latest]
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-        with:
-          version: 11
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - uses: $/.github/actions/setup-repo
 
       - name: Build helper binary
         run: |
@@ -134,15 +110,7 @@ jobs:
       PUPPETEER_SKIP_DOWNLOAD: 'true'
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-        with:
-          version: 11
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - uses: $/.github/actions/setup-repo
 
       # The ~100 MB official Firefox download is the bulk of the install step;
       # cache it keyed on the exact download URL (which embeds the release
@@ -212,8 +180,8 @@ jobs:
           if-no-files-found: ignore
 
   # ── Browser matrix (advisory, Windows) ────────────────────────────────────
-  # LibreWolf is on chocolatey. Floorp via winget.
-  # Firefox Dev Edition, Waterfox, and Zen require manual install.
+  # LibreWolf + Floorp install via winget. Firefox Dev Edition, Waterfox, and
+  # Zen require manual install.
   browser-matrix:
     name: 'updater E2E · ${{ matrix.browser }} · windows-latest'
     needs: snapshot-win
@@ -226,15 +194,7 @@ jobs:
       PUPPETEER_SKIP_DOWNLOAD: 'true'
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-        with:
-          version: 11
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - uses: $/.github/actions/setup-repo
 
       # downloads.mjs installs via the official recipe and resolves the real
       # binary from install dirs (never a PATH shim or app-execution alias,
