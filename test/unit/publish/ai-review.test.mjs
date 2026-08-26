@@ -11,6 +11,7 @@ import {
   isRetryable,
   normalizeFinding,
   parseArgs,
+  request,
   resolveBaseRef,
   resolveHeadRef,
   reviewFiles,
@@ -62,6 +63,44 @@ test('parseArgs rejects unknown flags', () => {
   assert.throws(() => parseArgs(['--nope']), /Unknown flag: --nope/);
 });
 
+test('request gives up immediately on 429, honoring no retry', async () => {
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return {ok: false, status: 429, headers: new Headers({'retry-after': '60'})};
+  };
+  try {
+    const out = await request({key: 'k', endpoint: 'https://x'}, {});
+    assert.equal(out.kind, 'transient');
+    assert.equal(out.status, 429);
+    assert.equal(calls, 1, '429 must not be retried');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('request aborts promptly when the run-level signal fires', async () => {
+  const realFetch = globalThis.fetch;
+  const controller = new AbortController();
+  globalThis.fetch = async (_url, {signal}) => {
+    await new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), {
+        once: true,
+      });
+    });
+  };
+  try {
+    const promise = request({key: 'k', endpoint: 'https://x'}, {}, controller.signal);
+    controller.abort();
+    const out = await promise;
+    assert.equal(out.kind, 'transient');
+    assert.equal(out.status, 429, 'aborted by a rate limit elsewhere');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 test('classifies transient and permanent provider statuses', () => {
   for (const status of [0, 408, 429, 500, 503]) {
     assert.equal(classifyStatus(status), 'transient');
@@ -105,13 +144,17 @@ test('collects findings and summaries from provider responses', async () => {
     ['b.js', 'diff b'],
     ['c.bin', 'Binary files differ'],
   ]);
+  // Files are now reviewed concurrently, so the fake must be order-
+  // independent: it keys its response off the file named in the prompt.
   let calls = 0;
   const result = await reviewFiles({
     files: ['a.js', 'b.js', 'c.bin'],
     fileDiffs,
     providers,
-    requestImpl: async () => {
+    requestImpl: async (provider, body) => {
       calls += 1;
+      const file =
+        /Review the diff of ([^\s:]+)/.exec(body.messages[1].content)?.[1] ?? `f${calls}`;
       return {
         kind: 'success',
         body: {
@@ -119,9 +162,9 @@ test('collects findings and summaries from provider responses', async () => {
             {
               message: {
                 content: JSON.stringify({
-                  summary: `Summary ${calls}`,
+                  summary: `Summary ${file}`,
                   findings:
-                    calls === 1 ?
+                    file === 'a.js' ?
                       [{line: 3, severity: 'warning', message: 'Risk A'}]
                     : [{line: 9, severity: 'error', message: 'Bug B', suggestion: 'Fix B'}],
                 }),
@@ -138,7 +181,7 @@ test('collects findings and summaries from provider responses', async () => {
   assert.equal(result.rdjson.diagnostics[0].severity, 'WARNING');
   assert.equal(result.rdjson.diagnostics[1].message, 'Bug B\n\nSuggestion: Fix B');
   assert.equal(result.summary.length, 2);
-  assert.match(result.summary[0], /Summary 1/);
+  assert.match(result.summary[0], /Summary a\.js/);
 });
 
 test('caps findings via maxFindings and honors summaryOnly', async () => {
@@ -190,11 +233,51 @@ test('records provider failure and stops on rate limit', async () => {
     ['b.js', 'diff b'],
   ]);
   const requestImpl = async () => ({kind: 'permanent', status: 429, reason: 'rate limited'});
-  const result = await reviewFiles({files: ['a.js', 'b.js'], fileDiffs, providers, requestImpl});
+  // concurrency 1 keeps the skip deterministic: a.js fails, b.js is skipped.
+  const result = await reviewFiles({
+    files: ['a.js', 'b.js'],
+    fileDiffs,
+    providers,
+    requestImpl,
+    concurrency: 1,
+  });
   assert.equal(result.rdjson.diagnostics.length, 0);
   assert.equal(result.summary.length, 2);
   assert.match(result.summary[0], /rate limited/);
   assert.match(result.summary[1], /rate limit exhausted/);
+});
+
+test('reviewFiles reviews files concurrently by default', async () => {
+  const providers = [{name: 'groq', model: 'm1', key: 'k', endpoint: 'https://x'}];
+  const fileDiffs = new Map([
+    ['a.js', 'diff a'],
+    ['b.js', 'diff b'],
+    ['c.js', 'diff c'],
+  ]);
+  let inFlight = 0;
+  let maxInFlight = 0;
+  let resolved = 0;
+  const requestImpl = async (provider, body) => {
+    inFlight += 1;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    inFlight -= 1;
+    resolved += 1;
+    const file = /Review the diff of ([^\s:]+)/.exec(body.messages[1].content)?.[1] ?? '?';
+    return {
+      kind: 'success',
+      body: {choices: [{message: {content: JSON.stringify({summary: `S ${file}`, findings: []})}}]},
+    };
+  };
+  const result = await reviewFiles({
+    files: ['a.js', 'b.js', 'c.js'],
+    fileDiffs,
+    providers,
+    requestImpl,
+  });
+  assert.equal(resolved, 3);
+  assert.ok(maxInFlight >= 2, `expected parallel calls, max in flight was ${maxInFlight}`);
+  assert.equal(result.summary.length, 3);
 });
 
 test('treats invalid JSON from the model as a per-file skip', async () => {

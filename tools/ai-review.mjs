@@ -44,13 +44,24 @@ const PROVIDERS = {
   },
 };
 
-const DEFAULT_SYSTEM_PROMPT = `You are a senior software engineer reviewing a pull request diff.
+// Context notes given to the model so it does not flag things that are
+// normal for this codebase: Node ≥ 20 runs in CI (native fetch, structuredClone
+// etc.), the script is ESM on the repo's own tooling, and a local helper that
+// is used internally (not exported) is fine.
+const REPO_CONTEXT = `Runtime context (do NOT flag these):
+- Node.js >= 20 is the only runtime — global fetch, AbortSignal.timeout, structuredClone are available.
+- This is an ESM module on Node; import.meta and top-level await are fine.
+- A function used by other code in the same module does not need to be exported.
+- This is a review helper/CI script, not user-facing browser code; logging is fine.`;
+
+const DEFAULT_SYSTEM_PROMPT = `You are a senior software engineer reviewing a pull request diff for real bugs, security issues, regressions, and footguns.
 Return ONLY a JSON object (no markdown, no code fences) with this shape:
 {"summary": "2-3 sentence overall assessment of the changes", "findings": [{"line": <int, line number in the NEW file>, "severity": "error"|"warning"|"info", "message": "what is wrong and why", "suggestion": "concrete fix (optional)"}]}
 Rules:
 - "line" must be the line number in the new (target) version of the file.
 - severity: error = bug/security/regression; warning = likely bug or footgun; info = minor.
-- Report only real problems — no style nits, no noise.
+- Only report findings that are DEFINITELY problems: a concrete bug, a security hole, a real regression, or a likely footgun with a specific failure mode. If unsure, do not report it.
+- Do NOT report: missing exports on internal helpers, APIs you assume are unavailable, style preferences, naming, or anything a reviewer would wave away.
 - If the changes are fine, return {"summary": "No issues found.", "findings": []}`;
 
 export function parseArgs(argv) {
@@ -161,8 +172,18 @@ export function normalizeFinding(finding, file) {
   };
 }
 
-export async function request(provider, body) {
+// Retry budget per provider request. An advisory review that hits a flaky or
+// rate-limited provider should degrade in seconds, not minutes (CI observed a
+// 6-minute run that ended with every file skipped). 429 is never retried: a
+// quota response is pointless to retry and the observed 429 windows last
+// minutes, so the first rate limit ends the file immediately. 5xx / network
+// blips get a short retry window (Retry-After honored but capped).
+const MAX_RETRY_MS = 15_000;
+const MAX_RETRY_AFTER_MS = 5_000;
+
+export async function request(provider, body, signal) {
   let delay = 2000;
+  const start = Date.now();
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       const response = await fetch(provider.endpoint, {
@@ -172,9 +193,17 @@ export async function request(provider, body) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(90_000),
+        signal:
+          signal ?
+            AbortSignal.any([signal, AbortSignal.timeout(90_000)])
+          : AbortSignal.timeout(90_000),
       });
       if (response.ok) return {kind: 'success', body: await response.json()};
+      if (response.status === 429) {
+        // First rate limit ends this file immediately; the run-level signal
+        // aborts anything still in flight (see reviewFiles).
+        return {kind: 'transient', status: 429};
+      }
       if (!isRetryable(response.status)) {
         let detail = '';
         try {
@@ -194,16 +223,21 @@ export async function request(provider, body) {
         };
       }
       const retryAfter = Number(response.headers.get('retry-after'));
-      await new Promise(resolve =>
-        setTimeout(
-          resolve,
-          Math.min(Number.isFinite(retryAfter) ? retryAfter * 1000 : delay, 30_000)
-        )
+      const wait = Math.min(
+        Number.isFinite(retryAfter) ? retryAfter * 1000 : delay,
+        MAX_RETRY_AFTER_MS
       );
+      if (attempt === 2 || Date.now() - start + wait > MAX_RETRY_MS) {
+        return {kind: 'transient', status: response.status};
+      }
+      await new Promise(resolve => setTimeout(resolve, wait));
       delay = Math.min(delay * 2, 16_000);
     } catch {
-      if (attempt === 2) return {kind: 'transient', status: 0};
-      await new Promise(resolve => setTimeout(resolve, delay));
+      if (signal?.aborted) return {kind: 'transient', status: 429};
+      if (attempt === 2 || Date.now() - start > MAX_RETRY_MS) {
+        return {kind: 'transient', status: 0};
+      }
+      await new Promise(resolve => setTimeout(resolve, Math.min(delay, MAX_RETRY_MS)));
       delay = Math.min(delay * 2, 16_000);
     }
   }
@@ -264,6 +298,24 @@ function availableProviders(args) {
 
 // Review a list of files with the given providers, calling requestImpl for
 // each file (injectable for tests). Returns diagnostics + per-file summaries.
+// Run fn over items with at most `limit` concurrent in-flight calls, keeping
+// result order aligned with input order. Used to review files in parallel so a
+// healthy run costs ~one request round-trip instead of one per file.
+async function withConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    for (;;) {
+      const i = next;
+      next += 1;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({length: Math.min(limit, items.length)}, worker));
+  return results;
+}
+
 export async function reviewFiles({
   files,
   fileDiffs,
@@ -273,32 +325,41 @@ export async function reviewFiles({
   summaryOnly = false,
   name = 'AI review',
   requestImpl = request,
+  concurrency = 4,
 }) {
   const diagnostics = [];
   const summaries = [];
   let rateLimited = false;
-  for (const file of files) {
-    if (rateLimited) {
-      summaries.push('> Groq rate limit exhausted; remaining files were skipped.');
-      break;
-    }
-    const diff = fileDiffs?.get(file) ?? '';
-    if (!diff || diff.startsWith('Binary files')) continue;
+  const controller = new AbortController();
+  const entries = files
+    .map(file => ({file, diff: fileDiffs?.get(file) ?? ''}))
+    .filter(({diff}) => diff && !diff.startsWith('Binary files'));
 
+  const results = await withConcurrency(entries, concurrency, async ({file, diff}) => {
+    if (rateLimited) return {file, skipped: true};
     const prompt = truncateDiff(diff, maxDiffChars);
     let result;
     let providerName = 'none';
     let providerFailure;
     for (const provider of providers) {
-      const outcome = await requestImpl(provider, {
-        model: provider.model,
-        temperature: 0.2,
-        response_format: {type: 'json_object'},
-        messages: [
-          {role: 'system', content: DEFAULT_SYSTEM_PROMPT},
-          {role: 'user', content: `Review the diff of ${file}:\n\n${prompt}`},
-        ],
-      });
+      const outcome = await requestImpl(
+        provider,
+        {
+          model: provider.model,
+          temperature: 0.2,
+          response_format: {type: 'json_object'},
+          messages: [
+            {role: 'system', content: DEFAULT_SYSTEM_PROMPT},
+            {
+              role: 'user',
+              content: `${REPO_CONTEXT}\n\nReview the diff of ${file}:\n\n${prompt}`,
+            },
+          ],
+        },
+        controller.signal
+      );
+      // A rate limit on another file aborts everything still in flight.
+      if (rateLimited) return {file, skipped: true};
       if (outcome.kind === 'success') {
         result = outcome.body;
         providerName = provider.name;
@@ -308,31 +369,51 @@ export async function reviewFiles({
       if (outcome.kind === 'permanent' && outcome.status !== 404) break;
     }
     if (!result) {
-      const reason =
-        providerFailure?.kind === 'permanent' ?
-          `${providerFailure.reason} (HTTP ${providerFailure.status}${providerFailure.detail ? `: ${providerFailure.detail}` : ''})`
-        : 'transient providers unavailable';
-      summaries.push(`⚠️ \`${file}\` — no provider completed the review (${reason}); skipped.`);
-      if (providerFailure?.status === 429) rateLimited = true;
+      if (providerFailure?.status === 429) {
+        rateLimited = true;
+        controller.abort();
+      }
+      return {file, failed: providerFailure};
+    }
+    return {file, result, providerName};
+  });
+
+  let skipped = 0;
+  for (const r of results) {
+    if (r.skipped) {
+      skipped += 1;
       continue;
     }
-    const content = result.choices?.[0]?.message?.content;
+    if (r.failed) {
+      const reason =
+        r.failed.kind === 'permanent' ?
+          `${r.failed.reason} (HTTP ${r.failed.status}${r.failed.detail ? `: ${r.failed.detail}` : ''})`
+        : r.failed.status ?
+          `${r.failed.status === 429 ? 'rate limited' : 'transient provider error'} (HTTP ${r.failed.status})`
+        : 'transient providers unavailable (network/timeout)';
+      summaries.push(`⚠️ \`${r.file}\` — no provider completed the review (${reason}); skipped.`);
+      continue;
+    }
+    const content = r.result.choices?.[0]?.message?.content;
     let parsed;
     try {
       parsed = JSON.parse(content);
     } catch {
       summaries.push(
-        `### \`${file}\` — ${providerName}\nModel returned invalid JSON; findings skipped.`
+        `### \`${r.file}\` — ${r.providerName}\nModel returned invalid JSON; findings skipped.`
       );
       continue;
     }
     summaries.push(
-      `### \`${file}\` — ${providerName}\n${parsed.summary || 'No summary provided.'}`
+      `### \`${r.file}\` — ${r.providerName}\n${parsed.summary || 'No summary provided.'}`
     );
     for (const finding of parsed.findings || []) {
-      const normalized = normalizeFinding(finding, file);
+      const normalized = normalizeFinding(finding, r.file);
       if (normalized.message.trim()) diagnostics.push(normalized);
     }
+  }
+  if (skipped > 0) {
+    summaries.push('> Groq rate limit exhausted; remaining files were skipped.');
   }
   const finalDiagnostics = summaryOnly ? [] : diagnostics.slice(0, maxFindings);
   return {
