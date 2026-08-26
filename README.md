@@ -3,8 +3,10 @@
 [![CI](https://github.com/onemen/firefox-scripts/actions/workflows/ci.yml/badge.svg)](https://github.com/onemen/firefox-scripts/actions/workflows/ci.yml)
 [![E2E](https://github.com/onemen/firefox-scripts/actions/workflows/e2e.yml/badge.svg)](https://github.com/onemen/firefox-scripts/actions/workflows/e2e.yml)
 
-> **🚧 Under active development** — the **installer** and **in-browser updater** are new and being
-> validated; the core scripts they install are the long-standing, stable ones. Found a problem?
+> **🚧 Under active development.** The **installer** and **in-browser updater** are new and being
+> validated. The core scripts they install are long-standing and stable, but because the updater
+> ships inside `utils.zip`, installing a fresh `utils.zip` starts the update checks — so the
+> repository as a whole is under active development for now. Found a problem?
 > [Open an issue](https://github.com/onemen/firefox-scripts/issues) and include your browser version
 > and OS.
 
@@ -16,7 +18,16 @@ browsers (Firefox stable/Nightly/Developer Edition, Waterfox, Zen, LibreWolf, Fl
 into the browser, and an in-browser updater keeps them current automatically as new versions are
 released.
 
-> **Official install documentation:** https://onemen.github.io/tabmixplus-docs/other/installation/
+## Supported browsers
+
+- Firefox (stable, Nightly, Developer Edition)
+- Waterfox
+- Zen Browser
+- LibreWolf
+- Floorp
+
+A browser must be **running** to be detected (detection uses process scanning and lock-file
+inspection).
 
 ## How to install the installer
 
@@ -37,16 +48,8 @@ released.
 > The install tab always opens. It is the piece that downloads the packages from the network; if
 > they cannot be reached, the tab shows a network-error banner instead of the install screen.
 
-### Supported browsers
-
-- Firefox (stable, Nightly, Developer Edition)
-- Waterfox
-- Zen Browser
-- LibreWolf
-- Floorp
-
-A browser must be **running** to be detected (detection uses process scanning and lock-file
-inspection).
+Prefer to install by hand? Follow the
+[manual installation guide](https://onemen.github.io/tabmixplus-docs/other/installation/).
 
 ## How the updater keeps your scripts up to date
 
@@ -64,8 +67,32 @@ Once installed, the scripts keep themselves current without you re-running the i
 - **Manual update.** You can always open the updater manually from the browser menu, or download the
   `utils.zip` / `fx-folder.zip` packages directly from the update tab.
 
-Scripts update automatically; configuration-file updates and browser restarts are applied when you
-choose to install them, keeping the process predictable.
+Updater UI scripts update automatically in the background. Configuration-file updates and browser
+restarts are applied only when you choose to install them, keeping the process predictable and under
+your control.
+
+## Original Scripts and Core Folders
+
+The scripts this project installs are the long-standing ones from
+[xiaoxiaoflood/firefox-scripts](https://github.com/xiaoxiaoflood/firefox-scripts) — the original
+project that lets Firefox-family browsers run legacy (non-WebExtension) extensions. In this
+repository they are bundled into two packages:
+
+- **`utils.zip`** — the chrome scripts (the userChromeJS loader, the legacy-extension shim, and the
+  in-browser updater), installed to your profile's `chrome/utils/` directory.
+- **`fx-folder.zip`** — the configuration files (`config.js`, `config-prefs.js`), installed to the
+  browser's installation directory.
+
+Both packages are also available for download from the
+[releases page](https://github.com/onemen/firefox-scripts/releases) — you can install or update them
+by hand. After your first install from this repository, the browser will notify you when a new
+version is available (see
+[How the updater keeps your scripts up to date](#how-the-updater-keeps-your-scripts-up-to-date)).
+
+The original scripts are governed by the
+[Mozilla Public License 2.0](https://www.mozilla.org/en-US/MPL/2.0/); the in-browser updater
+(`core/chrome/utils/updater/`) is custom to this project and licensed under the
+[MIT License](LICENSE.md).
 
 ## For developers
 
