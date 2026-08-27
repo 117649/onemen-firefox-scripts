@@ -285,21 +285,34 @@ Exit code 0 means every package's JS hash matches the C binary's (computed with 
   LibreWolf, Floorp, Zen; Waterfox tracked by version only) from its vendor API and verifies the
   download endpoint with a 1 KB ranged GET. Each new release is downloaded once, SHA-256'd and
   recorded in the per-release watchdog issue (`label:url-watchdog`) — the durable ledger. Opens
-  issues on rot (404, HTML error page, changed API shape) and same-version binary size changes. The
-  PR mode (`--pr`) is stateless, always green, and surfaces findings as annotations. Run manually
-  via `workflow_dispatch`, or locally with `node tools/check-browser-downloads.mjs --dry-run`.
+  issues on rot (404, HTML error page, changed API shape) and same-version binary size changes. Each
+  run logs the baseline's cache-hit status and age, so a silently evicted Actions cache is visible
+  instead of masquerading as a first run. The PR mode (`--pr`) is stateless, always green, and
+  surfaces findings as annotations. Run manually via `workflow_dispatch`, or locally with
+  `node tools/check-browser-downloads.mjs --dry-run`.
 
-**PR path filtering** — the installer + updater E2E jobs (`.github/workflows/e2e.yml`) run only when
-a changed file can affect them (`core/**`, `config/installer.conf`, `installer/**`,
-`tools/publish/**`, `test/e2e/**`, `package.json`, `pnpm-lock.yaml`, the workflow/actions); the
-publish gate (`build` in `.github/workflows/ci.yml`) runs only when `core/**`,
-`config/installer.conf`, `installer/**`, `tools/publish/**`, `package.json`, `pnpm-lock.yaml`, or
-the workflow/actions changed. Docs-only / tooling-only PRs skip both, while `checks`, `ci-gate` and
-`e2e-gate` always run so the required checks keep reporting. The `browser-matrix` legs (Firefox Dev
-Edition, LibreWolf, Floorp, Zen — downloaded from third-party hosts: Mozilla's redirect,
-librewolf.dev's package registry, GitHub release assets) are gated on the same filter and are
-advisory when they run: failures warn in the gate instead of failing the PR. Waterfox has no direct
-download URL and stays manual (tracked by version only in the URL watchdog).
+**PR path filtering** — every E2E job (`.github/workflows/e2e.yml`: the `snapshot` build, the
+installer/updater matrices, the `helper` elevated-copy test, and the `browser-matrix` fork legs) and
+the publish gate (`build` in `.github/workflows/ci.yml`) run only when a changed file can affect
+them (`core/**`, `config/installer.conf`, `installer/**`, `tools/publish/**`, `test/e2e/**`,
+`package.json`, `pnpm-lock.yaml`, the workflows/actions). Docs-only / tooling-only PRs skip all of
+them; `changes`, `checks`, `ci-gate` and `e2e-gate` always run, so the required checks keep
+reporting. The aggregate gates share one engine — `.github/actions/verify-gate` (required / advisory
+/ skip-guard / always-report checks) — and `pnpm check:gates` statically enforces the contract:
+every workflow job is listed in its gate's `needs:`, path-filter `if:`s stay in place, and
+always-report jobs carry no job-level `if:`. The `browser-matrix` legs (Firefox Dev Edition,
+LibreWolf, Floorp, Zen — downloaded from third-party hosts: Mozilla's redirect, librewolf.dev's
+package registry, GitHub release assets) are advisory when they run: failures warn in the gate
+instead of failing the PR. Waterfox has no direct download URL and stays manual (tracked by version
+only in the URL watchdog).
+
+**Merge queue** — the workflows trigger on `merge_group` in addition to `pull_request`, so the
+required checks also run on the merge queue's temporary merge-group branch. Enabling the queue
+(Settings → General → merge queue, with branch protection requiring it) makes the queue keep each PR
+up to date with main and validate it before landing (the final merge uses the repo's configured
+merge method). Because the "Update branch" step is never used, the ADR 0017 over-trigger caveat —
+main changes merged into a PR counting as PR changes for the path filters — does not arise for
+queued PRs.
 
 Run the smoke test locally (Windows, from the repo root):
 

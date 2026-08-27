@@ -21,6 +21,9 @@ on:
   pull_request:
     paths:
       - 'test/e2e/shared/downloads.mjs'
+  # The PR check is stateless + always green, so it can safely run on the
+  # merge queue too (a required check must report on merge_group).
+  merge_group:
   schedule:
     - cron: '0 6 * * 1' # Monday 06:00 UTC — browsers release ~monthly
   workflow_dispatch:
@@ -37,7 +40,7 @@ jobs:
   # ── Weekly: baseline + issues ─────────────────────────────────────────────
   check:
     name: check browser download URLs
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -48,12 +51,16 @@ jobs:
 
       # Baseline = last-seen version + size (+ one-time sha256 per release).
       # Weekly access keeps the 7-day cache TTL rolling; a missed run just
-      # re-baselines.
+      # re-baselines. Keys ROTATE per run (run_id): the cache service skips a
+      # save whose exact key already exists, so a fixed key would silently
+      # never persist the updated baseline after the first run. Restore falls
+      # back to the newest entry of the previous runs via the prefix.
       - name: Restore baseline
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .watchdog
-          key: url-watchdog-baseline-v1
+          key: url-watchdog-baseline-${{ github.run_id }}
+          restore-keys: url-watchdog-baseline-
 
       - name: Check browser downloads
         run: node tools/check-browser-downloads.mjs
@@ -61,12 +68,13 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
 
       # save-always: the script rewrites baseline.json every run even when the
-      # restore step hit, so a version bump is persisted for the next run.
+      # restore step hit; the fresh key persists a version bump for the next
+      # run (immutable old entries just expire after 7 days).
       - name: Save baseline
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .watchdog
-          key: url-watchdog-baseline-v1
+          key: url-watchdog-baseline-${{ github.run_id }}
           save-always: true
 
   # ── PR: stateless rot check at review time ────────────────────────────────
@@ -75,7 +83,7 @@ jobs:
   # can be added to branch protection as a required check.
   pr-check:
     name: browser download URLs (PR)
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
