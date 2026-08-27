@@ -5,11 +5,14 @@ set -euo pipefail
 
 # Optional inputs — the composite action always passes them (defaults ''),
 # but default them here so the script also runs safely outside Actions.
-: "${REQUIRED:=}" "${ADVISORY:=}" "${SKIP_GUARD:=}" "${ALWAYS_REPORT:=}" "${ALWAYS_VERIFY:=}"
+: "${REQUIRED:=}" "${ADVISORY:=}" "${SKIP_GUARD:=}" "${ALWAYS_REPORT:=}" "${ALWAYS_VERIFY:=}" "${APPLICABILITY:=}"
 
 fail() { echo "::error::$1: $2"; exit 1; }
 ok()   { echo "$1: $2 (OK)"; }
 verify() { case "$2" in success) ok "$1" "$2" ;; *) fail "$1" "$2" ;; esac; }
+# A job that is NOT applicable must be skipped: its changed-paths `if:` kept it
+# from running, so any other result means the filter wiring was lost.
+verifySkipped() { r="$(lookup "$1")"; if [ "$r" != "skipped" ]; then fail "$1" "$r (expected skipped — not applicable)"; fi; }
 
 # name:result lookup table (missing = the job never existed).
 declare -A RESULT
@@ -17,6 +20,11 @@ for spec in $RESULTS; do
   RESULT["${spec%%:*}"]="${spec#*:}"
 done
 lookup() { echo "${RESULT[$1]:-missing}"; }
+declare -A APPLIES
+for spec in $APPLICABILITY; do
+  APPLIES["${spec%%:*}"]="${spec#*:}"
+done
+applies() { [ "${APPLIES[$1]:-true}" = "true" ]; }
 
 verify 'changes' "$CHANGES_RESULT"
 # Always-run jobs (e.g. the lint/format `checks`) are verified in BOTH
@@ -26,16 +34,27 @@ for name in $ALWAYS_VERIFY; do
 done
 
 if [ "$BRANCH" = "true" ]; then
+  # Required jobs must pass when applicable; a job that is NOT applicable must
+  # be skipped (its changed-paths `if` kept it from running).
   for name in $REQUIRED; do
-    verify "$name" "$(lookup "$name")"
+    if applies "$name"; then
+      verify "$name" "$(lookup "$name")"
+    else
+      verifySkipped "$name"
+    fi
   done
-  # Advisory jobs warn instead of failing the gate (fork-browser legs).
+  # Advisory jobs warn instead of failing the gate (fork-browser legs);
+  # non-applicable ones must be skipped too.
   for name in $ADVISORY; do
-    r="$(lookup "$name")"
-    case "$r" in
-      success) ok "$name" "$r" ;;
-      *) echo "::warning::$name $r (advisory)" ;;
-    esac
+    if applies "$name"; then
+      r="$(lookup "$name")"
+      case "$r" in
+        success) ok "$name" "$r" ;;
+        *) echo "::warning::$name $r (advisory)" ;;
+      esac
+    else
+      verifySkipped "$name"
+    fi
   done
   echo "All gated jobs verified ($BRANCH_LABEL present)"
 else

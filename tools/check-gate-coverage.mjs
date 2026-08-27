@@ -15,11 +15,18 @@
  * This script parses the two workflow files and asserts the contract:
  *
  * - needs-coverage: every job (except the gate itself) is in the gate's needs.
- * - gated-if: jobs that must be path-filtered carry the filter's job-level `if:
- *   needs.changes.outputs.<key> == 'true'`.
- * - no-job-if: jobs that must always run/report (the publish gate's always-report
- *   design) carry NO job-level `if:`.
+ * - gated-if: each independently filtered job carries its expected job-level
+ *   changed-paths `if:` (the e2e workflow uses separate installer/updater/core
+ *   outputs, so a single branchKey no longer describes it).
+ * - no-job-if: jobs that must always run/report (the always-report design) carry
+ *   NO job-level `if:`.
  * - gate-if: the gate job carries `if: always()`.
+ * - applicability: every independently filtered job is listed in the gate's
+ *   `applicability:` block, so verify.sh can require it skipped when not
+ *   applicable.
+ * - verify-gate-uses: the gate job invokes ./.github/actions/verify-gate exactly
+ *   once, and ONLY that step's `with:` block is parsed as gate wiring (another
+ *   action's inputs must not satisfy the contract).
  *
  * Exit code 0 = contract holds. Run via `pnpm check:gates` (part of the
  * `checks` CI job). The parser is deliberately small — the workflow files are
@@ -36,9 +43,14 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 const JOB_LINE = /^ {2}([A-Za-z0-9_-]+):\s*$/;
 const NEEDS_LINE = /^ {4}needs:\s*(.+)$/;
 const IF_LINE = /^ {4}if:\s*(.+)$/;
+const STEP_LINE = /^ {6}- /;
+// `uses:` appears either inline with the step dash (`      - uses: x`) or
+// keyed under `- name:` (`        uses: x`). Strip a trailing `# comment`.
+const USES_LINE = /^(?: {6}- | {8})uses:\s*(.+)$/;
 const WITH_LINE = /^ {8}with:\s*$/;
 const WITH_INPUT = /^ {10}([A-Za-z0-9_-]+):\s*(.*)$/;
 const RESULTS_PAIR = /^ {12}([A-Za-z0-9_-]+):/;
+const VERIFY_GATE_USES = './.github/actions/verify-gate';
 
 /**
  * Split a workflow YAML into per-job blocks. Only the top-level `jobs:` map is
@@ -50,7 +62,12 @@ const RESULTS_PAIR = /^ {12}([A-Za-z0-9_-]+):/;
  * @param {string} text
  * @returns {Map<
  *   string,
- *   {ifs: string[]; needs: string[]; with: Object<string, any>}
+ *   {
+ *     ifs: string[];
+ *     needs: string[];
+ *     with: Object<string, any>;
+ *     verifyGateUses: number;
+ *   }
  * >}
  */
 export function parseJobs(text) {
@@ -58,6 +75,11 @@ export function parseJobs(text) {
   let current = null;
   let inJobs = false;
   let withKey = null;
+  // Step-level tracking: `uses:` of the current step, and whether we are
+  // inside a `with:` block that belongs to a non-verify-gate step (those are
+  // skipped — see WITH_LINE handling below).
+  let currentUses = null;
+  let skippingWith = false;
   for (const line of text.split('\n')) {
     if (/^jobs:\s*$/.test(line)) {
       inJobs = true;
@@ -65,6 +87,15 @@ export function parseJobs(text) {
     }
     if (!inJobs) continue;
     if (/^\S/.test(line)) break; // a top-level key after `jobs:`
+
+    // Inside a skipped `with:` block (a step that is NOT the verify-gate
+    // action): consume 10+-space content lines silently until we dedent back
+    // to step level — another action's inputs must never be read as gate
+    // wiring.
+    if (skippingWith) {
+      if (/^ {10,}/.test(line)) continue;
+      skippingWith = false;
+    }
 
     // Inside a `with:` block: 12-space `results:` pairs, 10-space inputs, or
     // an outdent that ends the block.
@@ -74,10 +105,15 @@ export function parseJobs(text) {
         jobs.get(current).with.results.push(rl[1]);
         continue;
       }
+      if (rl && withKey === 'applicability') {
+        jobs.get(current).with.applicability.push(rl[1]);
+        continue;
+      }
       const wi = WITH_INPUT.exec(line);
       if (wi) {
         withKey = wi[1] === 'results' ? 'results' : wi[1];
         if (withKey === 'results') jobs.get(current).with.results = [];
+        else if (withKey === 'applicability') jobs.get(current).with.applicability = [];
         else jobs.get(current).with[wi[1]] = wi[2].trim();
         continue;
       }
@@ -87,18 +123,32 @@ export function parseJobs(text) {
     const m = JOB_LINE.exec(line);
     if (m) {
       current = m[1];
-      jobs.set(current, {ifs: [], needs: [], with: {}});
+      jobs.set(current, {ifs: [], needs: [], with: {}, verifyGateUses: 0});
       continue;
     }
     if (!current) continue;
+    // Step boundary: step-level tracking resets — every step must re-declare
+    // its own `uses:`. (The dash line itself may carry the inline `uses:`,
+    // so fall through to USES_LINE instead of continuing.)
+    if (STEP_LINE.test(line)) currentUses = null;
+    const u = USES_LINE.exec(line);
+    if (u) {
+      currentUses = u[1].replace(/\s+#.*$/, '').trim();
+      if (currentUses === VERIFY_GATE_USES) jobs.get(current).verifyGateUses += 1;
+      continue;
+    }
     if (WITH_LINE.test(line)) {
-      withKey = '__with__';
+      // Only the verify-gate action's `with:` block is gate wiring; any other
+      // step's with-block (checkout's fetch-depth, …) is skipped wholesale.
+      if (currentUses === VERIFY_GATE_USES) withKey = '__with__';
+      else skippingWith = true;
       continue;
     }
     const wi = WITH_INPUT.exec(line);
     if (wi) {
       withKey = wi[1] === 'results' ? 'results' : wi[1];
       if (withKey === 'results') jobs.get(current).with.results = [];
+      else if (withKey === 'applicability') jobs.get(current).with.applicability = [];
       else jobs.get(current).with[wi[1]] = wi[2].trim();
       continue;
     }
@@ -131,14 +181,14 @@ export function parseJobs(text) {
  * @param {{
  *   file: string;
  *   gate: string;
- *   branchKey: string;
- *   gated?: string[];
+ *   gatedIfs?: Record<string, string>;
  *   noJobIf?: string[];
+ *   applicability?: string[];
  * }} contract
  * @returns {string[]}
  */
 export function checkWorkflow(text, contract) {
-  const {file, gate, branchKey, gated = [], noJobIf = []} = contract;
+  const {file, gate, gatedIfs = {}, noJobIf = [], applicability = []} = contract;
   const errors = [];
   const jobs = parseJobs(text);
   const gateJob = jobs.get(gate);
@@ -161,15 +211,14 @@ export function checkWorkflow(text, contract) {
     }
   }
 
-  const expectIf = `needs.changes.outputs.${branchKey} == 'true'`;
-  for (const name of gated) {
+  for (const [name, expectedIf] of Object.entries(gatedIfs)) {
     const job = jobs.get(name);
     if (!job) {
       errors.push(`${file}: gated job '${name}' not found`);
       continue;
     }
-    if (!job.ifs.includes(expectIf)) {
-      errors.push(`${file}: '${name}' must carry the path-filter 'if: ${expectIf}'`);
+    if (!job.ifs.includes(expectedIf)) {
+      errors.push(`${file}: '${name}' must carry the path-filter 'if: ${expectedIf}'`);
     }
   }
   for (const name of noJobIf) {
@@ -186,6 +235,15 @@ export function checkWorkflow(text, contract) {
   }
   if (!gateJob.ifs.includes('always()')) {
     errors.push(`${file}: gate '${gate}' must carry 'if: always()'`);
+  }
+
+  // The `with:` wiring below is only meaningful for the verify-gate action.
+  // Require the gate job to invoke it exactly once, so a renamed or swapped
+  // `uses:` cannot detach the wiring from the engine it configures.
+  if ((gateJob.verifyGateUses ?? 0) !== 1) {
+    errors.push(
+      `${file}: ${gate} must use ./.github/actions/verify-gate exactly once (found ${gateJob.verifyGateUses ?? 0})`
+    );
   }
 
   // verify-gate `with:` wiring: every needed job (except `changes`, which is
@@ -223,6 +281,15 @@ export function checkWorkflow(text, contract) {
       errors.push(`${file}: ${gate} classifies '${name}' but it is not in the verify-gate results`);
     }
   }
+  // Every independently filtered job must be listed in the gate's
+  // `applicability:` block — otherwise verify.sh defaults it to "applies"
+  // and a filtered-out job would be verified instead of required-skipped.
+  const app = w.applicability || [];
+  for (const name of applicability) {
+    if (!app.includes(name)) {
+      errors.push(`${file}: ${gate} applicability block is missing '${name}'`);
+    }
+  }
   return errors;
 }
 
@@ -230,13 +297,22 @@ const CONTRACTS = [
   {
     file: '.github/workflows/e2e.yml',
     gate: 'e2e-gate',
-    branchKey: 'e2e',
-    gated: ['snapshot', 'installer', 'helper', 'updater', 'browser-matrix'],
+    // Independent filter outputs (installer/updater/core) — each gated job
+    // must carry exactly its expected changed-paths `if:` and be listed in
+    // the gate's `applicability:` block.
+    gatedIfs: {
+      'snapshot': "needs.changes.outputs.updater == 'true' || needs.changes.outputs.core == 'true'",
+      'installer': "needs.changes.outputs.installer == 'true'",
+      'helper': "needs.changes.outputs.updater == 'true'",
+      'updater': "needs.changes.outputs.updater == 'true'",
+      'browser-matrix':
+        "needs.changes.outputs.updater == 'true' || needs.changes.outputs.core == 'true'",
+    },
+    applicability: ['snapshot', 'installer', 'helper', 'updater', 'browser-matrix'],
   },
   {
     file: '.github/workflows/ci.yml',
     gate: 'ci-gate',
-    branchKey: 'publish',
     noJobIf: ['build'], // always-report design — heavy steps gated, job always runs
   },
 ];
