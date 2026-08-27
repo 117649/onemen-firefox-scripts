@@ -1,6 +1,7 @@
 // test/unit/e2e/downloads.test.mjs — Unit tests for test/e2e/shared/downloads.mjs
 //
-// Tests: resolveDownloadUrl (per-platform URL resolution + error cases),
+// Tests: resolveDownloadUrl (per-platform URL resolution + error cases,
+// including the #35 firefox-dev hard-gate coverage on all 3 OSes),
 // downloadTo cache reuse (HEAD size match → reuse, mismatch/missing →
 // re-download), downloadDir (BROWSER_DL_DIR override).
 
@@ -16,7 +17,7 @@ const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const downloadsUrl = pathToFileURL(
   path.join(REPO_ROOT, 'test', 'e2e', 'shared', 'downloads.mjs')
 ).href;
-const {downloadDir, downloadTo, resolveDownloadUrl} = await import(downloadsUrl);
+const {DOWNLOADS, downloadDir, downloadTo, resolveDownloadUrl} = await import(downloadsUrl);
 
 // ── resolveDownloadUrl ────────────────────────────────────────────────────
 
@@ -27,6 +28,29 @@ test('resolveDownloadUrl: official installer URLs per platform', async () => {
   assert.match(win, /^https:\/\/download\.mozilla\.org\/\?product=firefox-latest&os=win64/);
   assert.match(mac, /^https:\/\/download\.mozilla\.org\/\?product=firefox-latest&os=osx/);
   assert.match(linux, /^https:\/\/download\.mozilla\.org\/\?product=firefox-latest&os=linux64/);
+});
+
+test('resolveDownloadUrl: firefox-dev resolves on all 3 OSes (#35 hard gate)', async () => {
+  const win = await resolveDownloadUrl('firefox-dev', 'win32');
+  const mac = await resolveDownloadUrl('firefox-dev', 'darwin');
+  const linux = await resolveDownloadUrl('firefox-dev', 'linux');
+  assert.match(win, /product=firefox-devedition-latest&os=win64/);
+  assert.match(mac, /product=firefox-devedition-latest&os=osx/);
+  assert.match(linux, /product=firefox-devedition-latest&os=linux64/);
+});
+
+test('dmg app names match the browser discovery registry (space-safe volumes)', async () => {
+  const browsersUrl = pathToFileURL(
+    path.join(REPO_ROOT, 'test', 'e2e', 'shared', 'browsers.mjs')
+  ).href;
+  const {BROWSERS} = await import(browsersUrl);
+  for (const browser of ['firefox', 'firefox-dev']) {
+    const recipe = DOWNLOADS[browser]?.install?.mac;
+    assert.ok(recipe?.app, `${browser} needs a mac dmg recipe`);
+    // installDmg copies `<mount>/<app>` and discovery looks for
+    // BROWSERS[browser].mac[0] under /Applications — the two must agree.
+    assert.equal(recipe.app, BROWSERS[browser].mac[0]);
+  }
 });
 
 test('resolveDownloadUrl: accepts short platform names (win/mac)', async () => {

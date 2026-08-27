@@ -70,9 +70,20 @@ export const DOWNLOADS = {
   'firefox-dev': {
     install: {
       // Same stable Mozilla "latest" redirect as Firefox stable, dev channel.
+      // Required legs on ALL 3 OSes (#35): Dev Edition is first-party Mozilla,
+      // so it is hard-gated like stable, unlike the forks.
       win: {
         url: 'https://download.mozilla.org/?product=firefox-devedition-latest&os=win64&lang=en-US',
         args: ['/S'], // NSIS silent install → %LOCALAPPDATA%\Firefox Developer Edition
+      },
+      mac: {
+        url: 'https://download.mozilla.org/?product=firefox-devedition-latest&os=osx&lang=en-US',
+        app: 'Firefox Developer Edition.app', // dmg → copy into /Applications
+      },
+      // Official tarball like stable — CI never uses the Snap wrapper (BiDi).
+      linux: {
+        tarball:
+          'https://download.mozilla.org/?product=firefox-devedition-latest&os=linux64&lang=en-US',
       },
     },
     page: 'https://www.mozilla.org/firefox/developer/',
@@ -259,7 +270,10 @@ async function fetchWithRetry(url, attempts, timeoutMs = 300_000) {
 export async function downloadTo(url, dest) {
   if (fs.existsSync(dest) && fs.statSync(dest).size > 0) {
     try {
-      const head = await fetch(url, {method: 'HEAD', signal: AbortSignal.timeout(15_000)});
+      const head = await fetch(url, {
+        method: 'HEAD',
+        signal: AbortSignal.timeout(15_000),
+      });
       const expected = head.ok ? Number(head.headers.get('content-length')) : 0;
       if (expected && fs.statSync(dest).size === expected) {
         console.log(`  reusing cached ${path.basename(dest)}`);
@@ -288,10 +302,18 @@ async function installInstaller(url, browser, args) {
 async function installDmg(url, appName) {
   const dmg = path.join(downloadDir(), `${appName.replace(/\.app$/, '')}.dmg`);
   await downloadTo(url, dmg);
-  // hdiutil prints e.g. `/dev/disk4s1  Apple_HFS  /Volumes/Firefox`. Keep the
-  // device too, so cleanup can detach even when the mount-point parse fails.
+  // hdiutil prints e.g. `/dev/disk4s1  Apple_HFS  /Volumes/Firefox` — but the
+  // mount point is the LAST column and may contain spaces (the Dev Edition
+  // image mounts at `/Volumes/Firefox Developer Edition`), so a `\S+` token
+  // match truncates at the first space and the copy looks in the wrong dir.
+  // Take everything after `/Volumes/` to the end of the line instead. Keep
+  // the device too, so cleanup can detach even when this parse fails.
   const out = execSync(`hdiutil attach -nobrowse -readonly "${dmg}"`).toString();
-  const mountPoint = (out.match(/\/Volumes\/\S+/g) || []).pop();
+  const mounts = out
+    .split('\n')
+    .filter(line => line.includes('/Volumes/'))
+    .map(line => line.slice(line.indexOf('/Volumes/')).trim());
+  const mountPoint = mounts[mounts.length - 1];
   const device = (out.match(/\/dev\/disk\S+/g) || [])[0];
   try {
     if (!mountPoint) {
