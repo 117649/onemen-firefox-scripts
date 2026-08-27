@@ -38,6 +38,7 @@ on:
 
 permissions:
   contents: write # release assets + gh-pages pushes
+  actions: write # release-gate cache-prune step deletes stale Actions caches
 
 concurrency:
   group: pages-publish
@@ -99,6 +100,12 @@ jobs:
             echo "::error::no successful E2E workflow run for commit ${{ github.sha }} — let the E2E run on main finish (or re-run it), then re-dispatch the publish."
             exit 1
           fi
+      # Release-gate cache hygiene (#47): the same prune the weekly workflow
+      # runs, executed once more before any publish so a prod upload always
+      # starts from a lean cache (stale firefox-dl-*/node-cache-* keys would
+      # otherwise linger until Sunday).
+      - name: Prune stale Actions caches
+        run: node tools/ci/prune-caches.mjs --keep=3
 
   # Snapshot the hash manifest as it was BEFORE this run started. Every
   # publish job diffs its sources against this same baseline, so a source
