@@ -1878,7 +1878,8 @@ static int launch_browser_profile(const RunningBrowser *b, const char *url) {
  * Open a URL in a SPECIFIC profile by launching the binary with --profile.
  * Firefox routes the URL to the running instance of that profile (or starts a
  * new one), so the installer tab reliably lands in a known browser instead of
- * whichever instance happens to claim a bare URL.
+ * whichever instance happens to claim a bare URL.  The launch is argument-array
+ * based (no shell), mirroring launch_browser_profile().
  */
 static void open_url_in_profile(const char *binary, const char *profile, const char *url) {
     if (strlen(binary) == 0 || strlen(profile) == 0) {
@@ -1903,7 +1904,18 @@ static void open_url_in_profile(const char *binary, const char *profile, const c
     log_msg("[openurl] CreateProcessW failed: %lu\n", GetLastError());
     open_browser(url, NULL);
 #else
-    open_browser(url, binary);
+    pid_t child = fork();
+    if (child == 0) {
+        setsid();
+        execl(binary, binary, "-profile", profile, "--new-tab", url, (char *)NULL);
+        _exit(1);
+    }
+    if (child > 0) {
+        log_msg("[openurl] forked PID %d for profile %s\n", child, profile);
+        return;
+    }
+    log_msg("[openurl] fork failed\n");
+    open_browser(url, NULL);
 #endif
 }
 
@@ -2540,12 +2552,31 @@ static int main_impl(int argc, char *argv[]) {
     snprintf(g_ui_url, sizeof(g_ui_url), "http://localhost:%d/?t=%s", port, g_session_token);
     log_msg("[startup] opening %s\n", g_ui_url);
     if (!g_smoke_test) {
+        // E2E diagnostics: echo the detection + launch decision to stdout so
+        // installer-e2e.mjs (which inherits this process's stdio) can report
+        // why a tab did or did not appear in the test browser.
+        printf("[installer] detected %d browser(s):\n", detected_count);
+        log_msg("[installer] detected %d browser(s):\n", detected_count);
+        for (int i = 0; i < detected_count; i++) {
+            printf("  [%d] %s\n      binary: %s\n      profile: %s\n", i,
+                   detected_browsers[i].identified_browser,
+                   detected_browsers[i].binary_path,
+                   detected_browsers[i].profile_path);
+            log_msg("  [%d] %s binary: %s profile: %s\n", i,
+                    detected_browsers[i].identified_browser,
+                    detected_browsers[i].binary_path,
+                    detected_browsers[i].profile_path);
+        }
         if (detected_count > 0) {
             // Prefer the most recently used browser window over the first
             // detected entry, so with several browsers open the tab lands where
             // the user is actually working instead of an arbitrary instance.
             int ui_host_idx = find_last_used_browser_index(detected_browsers, detected_count);
             if (ui_host_idx < 0) ui_host_idx = 0;
+            printf("[installer] opening %s in browser %d (%s)\n", g_ui_url,
+                   ui_host_idx, detected_browsers[ui_host_idx].identified_browser);
+            log_msg("[installer] opening %s in browser %d (%s)\n", g_ui_url,
+                    ui_host_idx, detected_browsers[ui_host_idx].identified_browser);
             // Record which profile hosts the UI tab so the restart worker can
             // reopen the UI there after a restart that kills this browser.
             if (strlen(detected_browsers[ui_host_idx].profile_path) > 0) {
@@ -2557,8 +2588,11 @@ static int main_impl(int argc, char *argv[]) {
             // Bring the hosting window to the foreground so the new tab is visible.
             focus_browser_window(detected_browsers[ui_host_idx].pid);
         } else {
+            printf("[installer] no browsers detected; falling back to default browser\n");
+            log_msg("[installer] no browsers detected; falling back to default browser\n");
             open_browser(g_ui_url, NULL);  // fallback to default browser
         }
+        fflush(stdout);  // long-running process: make the E2E diagnostics visible
     }
 
     printf("Press Ctrl+C to stop the installer.\n");

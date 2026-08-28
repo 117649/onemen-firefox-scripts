@@ -121,8 +121,24 @@ jobs:
       - name: Build snapshot
         run: pnpm upload:local --mode=dev
 
-      - name: Run installer E2E
-        run: node test/e2e/installer/installer-e2e.mjs
+      # The UI layer launches a real Firefox (even headless it needs a display
+      # server on Linux runners), so install xvfb and run under it — same as
+      # the updater job below.
+      - name: Install Linux test prerequisites
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb
+
+      - name: Run installer E2E (Ubuntu)
+        if: startsWith(matrix.os, 'ubuntu')
+        # -a picks a free display number, avoiding collisions with the
+        # updater E2E job that also runs under xvfb-run on the same runner.
+        run: xvfb-run -a node test/e2e/installer/installer-e2e.mjs --ui --headless
+
+      - name: Run installer E2E (macOS/Windows)
+        if: ${{ !startsWith(matrix.os, 'ubuntu') }}
+        run: node test/e2e/installer/installer-e2e.mjs --ui --headless
 
   # ── Helper E2E (Linux elevated-copy core) ──────────────────────────────────
   helper:
@@ -225,7 +241,7 @@ jobs:
       # step above) and auto-discovers the snapshot dir.
       - name: Run updater E2E (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: xvfb-run node test/e2e/updater/updater-e2e.mjs
+        run: xvfb-run -a node test/e2e/updater/updater-e2e.mjs
 
       - name: Run updater E2E (macOS)
         if: matrix.os == 'macos-latest'

@@ -47,6 +47,13 @@ typedef struct {
 
 /* Forward declarations */
 static void find_active_profile_readonly(const char *binary_path, char *out_profile_path);
+#if defined(__APPLE__)
+static void find_profile_from_macos_argv(pid_t pid, const char *binary_path,
+                                         char *out, size_t out_size);
+/* Defined below with the Linux helpers; shared by the macOS argv scan. */
+static int lookup_profile_by_name(const char *base_dir, const char *profile_name,
+                                  char *out_path, size_t out_size);
+#endif
 static int hash_uploaded_zip(int is_utils, char *out_hash, size_t hash_size,
                              char ***out_list, int *out_count);
 static void free_file_list(char ***list, int *count);
@@ -1136,6 +1143,51 @@ static const char *TARGET_EXECUTABLES[] = {
     NULL
 };
 
+/**
+ * True if the process executable at `full_path` is one of the target browsers.
+ *
+ * Windows matches the process image name (`pe.szExeFile`); POSIX scans resolve
+ * a full path (proc_pidpath / /proc/<pid>/exe) and MUST compare its basename,
+ * not strstr on the whole path: the installer itself runs from
+ * <repo>/firefox-scripts/... and a substring match would detect it (and its
+ * empty profile) as a browser, stealing the UI tab from the real browser.
+ */
+static int is_target_executable(const char *full_path) {
+    if (!full_path || full_path[0] == '\0') return 0;
+    const char *base = strrchr(full_path, '/');
+    base = base ? base + 1 : full_path;
+#if defined(_WIN32)
+    const char *wbase = strrchr(base, '\\');
+    if (wbase) base = wbase + 1;
+    for (int i = 0; TARGET_EXECUTABLES[i] != NULL; i++) {
+        if (_stricmp(base, TARGET_EXECUTABLES[i]) == 0) return 1;
+    }
+#elif defined(__APPLE__)
+    // macOS filesystems are case-insensitive by default.
+    for (int i = 0; TARGET_EXECUTABLES[i] != NULL; i++) {
+        if (strcasecmp(base, TARGET_EXECUTABLES[i]) == 0) return 1;
+    }
+#else
+    // A running binary whose file was replaced by a package update shows up
+    // as "<path> (deleted)" in /proc/<pid>/exe; strip only that recognized
+    // suffix so the still-running browser keeps matching its basename.
+    char name[MAX_PATH_LEN];
+    size_t blen = strlen(base);
+    static const char kDeletedSuffix[] = " (deleted)";
+    const size_t dlen = sizeof(kDeletedSuffix) - 1;
+    if (blen > dlen && memcmp(base + blen - dlen, kDeletedSuffix, dlen) == 0) {
+        blen -= dlen;
+    }
+    if (blen >= sizeof(name)) blen = sizeof(name) - 1;
+    memcpy(name, base, blen);
+    name[blen] = '\0';
+    for (int i = 0; TARGET_EXECUTABLES[i] != NULL; i++) {
+        if (strcmp(name, TARGET_EXECUTABLES[i]) == 0) return 1;
+    }
+#endif
+    return 0;
+}
+
 enum BrowserVariant identify_variant_from_path(const char *path) {
     if (strstr(path, "Zen twilight") || strstr(path, "zen-twilight") || strstr(path, "Twilight")) {
         return BROWSER_ZEN_TWILIGHT;
@@ -1663,7 +1715,89 @@ static bool is_duplicate_entry(RunningBrowser *results, int count,
     return false;
 }
 
-#if defined(__linux__)
+#if defined(__APPLE__)
+/**
+ * Read a process's argv on macOS (no /proc) via sysctl KERN_PROCARGS2 and
+ * extract the --profile/-P argument it was launched with, if any.  Used to
+ * find a browser's active profile when it is a temp dir (e.g. a puppeteer
+ * profile) that never appears in profiles.ini.
+ */
+static void find_profile_from_macos_argv(pid_t pid, const char *binary_path,
+                                         char *out, size_t out_size) {
+    out[0] = '\0';
+    int mib[3] = { CTL_KERN, KERN_PROCARGS2, pid };
+    size_t size = 0;
+    if (sysctl(mib, 3, NULL, &size, NULL, 0) < 0 || size > 4 * 1024 * 1024) return;
+    char *buf = malloc(size);
+    if (!buf) return;
+    if (sysctl(mib, 3, buf, &size, NULL, 0) == 0 && size > sizeof(int)) {
+        int argc = 0;
+        memcpy(&argc, buf, sizeof(argc));
+        // After argc: executable path, then the NUL-separated argv, then an
+        // empty string, then the environment.  Skip the executable and scan
+        // argv for -profile/--profile/-P (the value is the NEXT argument).
+        char *p = buf + sizeof(int);
+        char *end = buf + size;
+        // KERN_PROCARGS2 lays out: argc, argv[0] path string, then the argv
+        // entries (an empty string separates them) — skip empty entries and
+        // honor argc so we never wander into the environment block.
+        p += strlen(p) + 1;  // skip argv[0] (the executable path)
+        int idx = 1;
+        while (idx < argc && p < end) {
+            if (*p) {
+                if (strcmp(p, "-profile") == 0 || strcmp(p, "--profile") == 0 ||
+                    strcmp(p, "-P") == 0) {
+                    const char *val = p + strlen(p) + 1;
+                    if (val < end && *val) {
+                        if (strcmp(p, "-P") == 0) {
+                            char base_dir[MAX_PATH_LEN] = { 0 };
+                            const char *home = getenv("HOME");
+                            if (!home) {
+                                struct passwd *pw = getpwuid(getuid());
+                                if (pw) home = pw->pw_dir;
+                            }
+                            if (home) {
+                                // macOS keeps browser profiles under
+                                // ~/Library/Application Support (matching
+                                // find_active_profile_readonly() below), not
+                                // in the dot-directories Linux uses.
+                                switch (identify_variant_from_path(binary_path)) {
+                                    case BROWSER_ZEN:
+                                    case BROWSER_ZEN_TWILIGHT:
+                                        snprintf(base_dir, sizeof(base_dir), "%s/Library/Application Support/zen", home);
+                                        break;
+                                    case BROWSER_WATERFOX:
+                                    case BROWSER_WATERFOX_BETA:
+                                        snprintf(base_dir, sizeof(base_dir), "%s/Library/Application Support/Waterfox", home);
+                                        break;
+                                    case BROWSER_LIBREWOLF:
+                                        snprintf(base_dir, sizeof(base_dir), "%s/Library/Application Support/LibreWolf", home);
+                                        break;
+                                    case BROWSER_FLOORP:
+                                        snprintf(base_dir, sizeof(base_dir), "%s/Library/Application Support/Floorp", home);
+                                        break;
+                                    default:
+                                        snprintf(base_dir, sizeof(base_dir), "%s/Library/Application Support/Firefox", home);
+                                        break;
+                                }
+                                lookup_profile_by_name(base_dir, val, out, out_size);
+                            }
+                        } else {
+                            strncpy(out, val, out_size - 1);
+                            out[out_size - 1] = '\0';
+                        }
+                    }
+                }
+                idx++;
+            }
+            p += strlen(p) + 1;
+        }
+    }
+    free(buf);
+}
+#endif
+
+#if defined(__linux__) || defined(__APPLE__)
 /**
  * Look up a profile name in profiles.ini and return its full path.
  * Returns 0 on success, -1 if not found.
@@ -1721,7 +1855,9 @@ static int lookup_profile_by_name(const char *base_dir, const char *profile_name
 
     return 0;
 }
+#endif /* __linux__ || __APPLE__ */
 
+#if defined(__linux__)
 /**
  * Read /proc/<pid>/cmdline to find the profile name/path this process was launched with.
  * Falls back to find_active_profile_readonly() if command line doesn't specify a profile.
@@ -2539,35 +2675,48 @@ int scan_and_filter_browsers(RunningBrowser *results, int max_results) {
             if (len != -1) {
                 full_path[len] = '\0';
 
-                for (int i = 0; TARGET_EXECUTABLES[i] != NULL; i++) {
-                    if (strstr(full_path, TARGET_EXECUTABLES[i]) != NULL) {
-                        // Detect profile BEFORE dedup check (PID-aware on Linux)
-                        char profile_path[MAX_PATH_LEN] = { 0 };
-                        find_profile_for_pid((unsigned long)pid, full_path, profile_path);
+                // A package update may have unlinked the running binary; the
+                // kernel then reports "<path> (deleted)".  Strip that suffix
+                // so the stored binary_path stays valid (it is later passed
+                // to execl() on relaunch).  is_target_executable() keeps its
+                // own stripping as a defensive fallback.
+                static const char kDeletedSuffix[] = " (deleted)";
+                const size_t dlen = sizeof(kDeletedSuffix) - 1;
+                if (len > (ssize_t)dlen &&
+                    memcmp(full_path + len - dlen, kDeletedSuffix, dlen) == 0) {
+                    len -= (ssize_t)dlen;
+                    full_path[len] = '\0';
+                }
 
-                        // Dedup by (binary_path + profile_path) so different profiles are distinct
-                        if (!is_duplicate_entry(results, count, full_path, profile_path) && count < max_results) {
-                            snprintf(results[count].exe_name, sizeof(results[count].exe_name), "%s", TARGET_EXECUTABLES[i]);
-                            strncpy(results[count].binary_path, full_path, MAX_PATH_LEN);
-                            strncpy(results[count].profile_path, profile_path, MAX_PATH_LEN);
-                            results[count].pid = (unsigned long)pid;
+                if (is_target_executable(full_path)) {
+                    // Detect profile BEFORE dedup check (PID-aware on Linux)
+                    char profile_path[MAX_PATH_LEN] = { 0 };
+                    find_profile_for_pid((unsigned long)pid, full_path, profile_path);
 
-                            resolve_browser_name(full_path, results[count].identified_browser, sizeof(results[count].identified_browser));
-                            read_application_version(full_path,
-                                                     identify_variant_from_path(full_path),
-                                                     results[count].version, sizeof(results[count].version));
+                    // Dedup by (binary_path + profile_path) so different profiles are distinct
+                    if (!is_duplicate_entry(results, count, full_path, profile_path) && count < max_results) {
+                        const char *exe_name = strrchr(full_path, '/');
+                        exe_name = exe_name ? exe_name + 1 : full_path;
+                        snprintf(results[count].exe_name, sizeof(results[count].exe_name), "%s", exe_name);
+                        strncpy(results[count].binary_path, full_path, MAX_PATH_LEN);
+                        strncpy(results[count].profile_path, profile_path, MAX_PATH_LEN);
+                        results[count].pid = (unsigned long)pid;
 
-                            if (strlen(results[count].profile_path) > 0) {
-                                char binary_dir[MAX_PATH_LEN];
-                                strncpy(binary_dir, full_path, MAX_PATH_LEN);
-                                get_parent_dir(binary_dir);
+                        resolve_browser_name(full_path, results[count].identified_browser, sizeof(results[count].identified_browser));
+                        read_application_version(full_path,
+                                                 identify_variant_from_path(full_path),
+                                                 results[count].version, sizeof(results[count].version));
 
-                                results[count].config_installed = check_config_status(binary_dir);
-                                results[count].utils_installed = check_utils_status(results[count].profile_path);
-                            }
+                        if (strlen(results[count].profile_path) > 0) {
+                            char binary_dir[MAX_PATH_LEN];
+                            strncpy(binary_dir, full_path, MAX_PATH_LEN);
+                            get_parent_dir(binary_dir);
 
-                            count++;
+                            results[count].config_installed = check_config_status(binary_dir);
+                            results[count].utils_installed = check_utils_status(results[count].profile_path);
                         }
+
+                        count++;
                     }
                 }
             }
@@ -2589,37 +2738,44 @@ int scan_and_filter_browsers(RunningBrowser *results, int max_results) {
             pid_t pid = procs[i].kp_proc.p_pid;
             char full_path[MAX_PATH_LEN] = { 0 };
 
-            if (proc_pidpath(pid, full_path, sizeof(full_path)) > 0) {
-                for (int j = 0; TARGET_EXECUTABLES[j] != NULL; j++) {
-                    if (strstr(full_path, TARGET_EXECUTABLES[j]) != NULL) {
-                        // Detect profile BEFORE dedup check
-                        char profile_path[MAX_PATH_LEN] = { 0 };
-                        find_active_profile_readonly(full_path, profile_path);
+            if (proc_pidpath(pid, full_path, sizeof(full_path)) > 0 &&
+                is_target_executable(full_path)) {
+                // Detect profile BEFORE dedup check. macOS has no /proc, so
+                // read the process argv (KERN_PROCARGS2) to find the explicit
+                // --profile/-P the browser was launched with — a temp profile
+                // (e.g. puppeteer's) is not in profiles.ini and would
+                // otherwise resolve to nothing, sending the UI tab elsewhere.
+                char profile_path[MAX_PATH_LEN] = { 0 };
+                find_profile_from_macos_argv(pid, full_path, profile_path, sizeof(profile_path));
+                if (strlen(profile_path) == 0) {
+                    find_active_profile_readonly(full_path, profile_path);
+                }
 
-                        // Dedup by (binary_path + profile_path) so different profiles are distinct
-                        if (!is_duplicate_entry(results, count, full_path, profile_path) && count < max_results) {
-                            snprintf(results[count].exe_name, sizeof(results[count].exe_name), "%s", TARGET_EXECUTABLES[j]);
-                            strncpy(results[count].binary_path, full_path, MAX_PATH_LEN);
-                            strncpy(results[count].profile_path, profile_path, MAX_PATH_LEN);
-                            results[count].pid = (unsigned long)pid;
+                // Dedup by (binary_path + profile_path) so different profiles are distinct
+                if (!is_duplicate_entry(results, count, full_path, profile_path) && count < max_results) {
+                    const char *exe_name = strrchr(full_path, '/');
+                    exe_name = exe_name ? exe_name + 1 : full_path;
+                    snprintf(results[count].exe_name, sizeof(results[count].exe_name), "%s", exe_name);
+                    strncpy(results[count].binary_path, full_path, MAX_PATH_LEN);
+                    strncpy(results[count].profile_path, profile_path, MAX_PATH_LEN);
+                    results[count].pid = (unsigned long)pid;
 
-                            resolve_browser_name(full_path, results[count].identified_browser, sizeof(results[count].identified_browser));
-                            read_application_version(full_path,
-                                                     identify_variant_from_path(full_path),
-                                                     results[count].version, sizeof(results[count].version));
+                    resolve_browser_name(full_path, results[count].identified_browser,
+                                         sizeof(results[count].identified_browser));
+                    read_application_version(full_path,
+                                             identify_variant_from_path(full_path),
+                                             results[count].version, sizeof(results[count].version));
 
-                            if (strlen(results[count].profile_path) > 0) {
-                                char binary_dir[MAX_PATH_LEN];
-                                strncpy(binary_dir, full_path, MAX_PATH_LEN);
-                                get_parent_dir(binary_dir);
+                    if (strlen(results[count].profile_path) > 0) {
+                        char binary_dir[MAX_PATH_LEN];
+                        strncpy(binary_dir, full_path, MAX_PATH_LEN);
+                        get_parent_dir(binary_dir);
 
-                                results[count].config_installed = check_config_status(binary_dir);
-                                results[count].utils_installed = check_utils_status(results[count].profile_path);
-                            }
-
-                            count++;
-                        }
+                        results[count].config_installed = check_config_status(binary_dir);
+                        results[count].utils_installed = check_utils_status(results[count].profile_path);
                     }
+
+                    count++;
                 }
             }
         }
