@@ -20,7 +20,7 @@
  * official download page instead; the CLI fails with a clear message.
  */
 
-import {execSync} from 'node:child_process';
+import {execSync, spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -230,8 +230,7 @@ async function resolveLatestUrl({api, pick, url}) {
 }
 
 /** Download an official Mozilla tarball and extract it; returns the binary path. */
-async function installTarball(url, browser) {
-  const dest = path.join(os.homedir(), 'firefox-app');
+async function installTarball(url, browser, dest = path.join(os.homedir(), 'firefox-app')) {
   const archive = path.join(downloadDir(), `firefox-${browser}.tar.xz`);
   fs.mkdirSync(dest, {recursive: true});
 
@@ -335,6 +334,65 @@ async function installInstaller(url, browser, args) {
   execSync(`"${exe}" ${args.join(' ')}`, {stdio: 'inherit'});
 }
 
+/** Download Firefox Release into a custom, non-registered directory. */
+async function installPortableFirefox(url, platform) {
+  const dest = process.env.PORTABLE_BROWSER_DIR;
+  if (!dest) throw new Error('PORTABLE_BROWSER_DIR is required for portable Firefox');
+  fs.mkdirSync(dest, {recursive: true});
+
+  if (platform === 'linux') {
+    const binary = await installTarball(url, 'firefox-portable', dest);
+    return binary;
+  }
+
+  if (platform === 'win32') {
+    const exe = path.join(downloadDir(), 'firefox-portable-setup.exe');
+    await downloadTo(url, exe);
+    // NSIS /D must be the final argument and uses a custom directory instead
+    // of the registered Program Files location.
+    // Pass the final /D= option directly to NSIS. PowerShell launches this
+    // Node process with native Windows paths, and verbatim arguments prevent
+    // MSYS/Git Bash path rewriting when the same helper is used locally.
+    const result = spawnSync(exe, ['/S', `/D=${dest}`], {
+      stdio: 'inherit',
+      windowsVerbatimArguments: true,
+    });
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      throw new Error(`Firefox portable installer exited with code ${result.status}`);
+    }
+    const binary = path.join(dest, 'firefox.exe');
+    if (!fs.existsSync(binary)) throw new Error(`portable Firefox binary not found: ${binary}`);
+    return binary;
+  }
+
+  if (platform === 'darwin') {
+    const dmg = path.join(downloadDir(), 'firefox-portable.dmg');
+    await downloadTo(url, dmg);
+    // Same hardened parse as installDmg below: the mount point is the last
+    // column and may contain spaces, so take everything after `/Volumes/` on
+    // matching lines and keep the device for cleanup.
+    const out = execSync(`hdiutil attach -nobrowse -readonly "${dmg}"`).toString();
+    const mounts = out
+      .split('\n')
+      .filter(line => line.includes('/Volumes/'))
+      .map(line => line.slice(line.indexOf('/Volumes/')).trim());
+    const mount = mounts[mounts.length - 1];
+    const device = (out.match(/\/dev\/disk\S+/g) || [])[0];
+    try {
+      if (!mount) throw new Error(`cannot find Firefox DMG mount point: ${out}`);
+      execSync(`cp -R "${mount}/Firefox.app" "${dest}/"`);
+    } finally {
+      if (device || mount) execSync(`hdiutil detach "${device || mount}"`);
+    }
+    const binary = path.join(dest, 'Firefox.app', 'Contents', 'MacOS', 'firefox');
+    if (!fs.existsSync(binary)) throw new Error(`portable Firefox binary not found: ${binary}`);
+    return binary;
+  }
+
+  throw new Error(`unsupported portable Firefox platform: ${platform}`);
+}
+
 /** Download an official dmg, mount it, and copy the app into /Applications. */
 async function installDmg(url, appName) {
   const dmg = path.join(downloadDir(), `${appName.replace(/\.app$/, '')}.dmg`);
@@ -366,6 +424,13 @@ async function installDmg(url, appName) {
   }
 }
 
+/** Export the resolved browser binary for GitHub Actions callers. */
+export function exportBinaryPath(binary) {
+  if (process.env.GITHUB_ENV) {
+    fs.appendFileSync(process.env.GITHUB_ENV, `FIREFOX_BINARY=${binary}\n`);
+  }
+}
+
 /**
  * Install a browser for a platform and return the resolved binary path.
  *
@@ -385,6 +450,17 @@ export async function installBrowser(browser, platform = process.platform) {
       `${browser} has no automated install for ${key}` +
         (def.page ? ` — manual install only (official page: ${def.page})` : '')
     );
+  }
+  if (browser === 'firefox' && process.env.PORTABLE_BROWSER_DIR) {
+    const url = recipe.tarball || recipe.url;
+    const binary = await installPortableFirefox(
+      url,
+      key === 'win' ? 'win32'
+      : key === 'mac' ? 'darwin'
+      : 'linux'
+    );
+    console.log(`  ${browser} installed portably: ${binary}`);
+    return binary;
   }
   if (recipe.tarball) {
     const binary = await installTarball(recipe.tarball, browser);
@@ -431,7 +507,8 @@ async function main() {
 
 Installs <browser> for the current OS (or --os) using its official download
 recipe, then prints the resolved binary path and, in GitHub Actions, sets
-FIREFOX_BINARY via $GITHUB_ENV. With --url, prints the download URL instead
+FIREFOX_BINARY via $GITHUB_ENV. Set PORTABLE_BROWSER_DIR to install Firefox
+Release into a custom directory instead of a system location. With --url, prints the download URL instead
 (used to key the CI download cache).`);
     process.exit(browser ? 0 : 1);
   }
@@ -451,9 +528,7 @@ FIREFOX_BINARY via $GITHUB_ENV. With --url, prints the download URL instead
 
   const binary = await installBrowser(browser, normalized);
   console.log(binary);
-  if (process.env.GITHUB_ENV) {
-    fs.appendFileSync(process.env.GITHUB_ENV, `FIREFOX_BINARY=${binary}\n`);
-  }
+  exportBinaryPath(binary);
 }
 
 // Basename (not endsWith) so modules with a similar name — e.g.
