@@ -738,6 +738,13 @@ static int tcp_listening(int port) {
     WSADATA wsa;
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return 0;
     SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
+    /* -fanalyzer false positive: it models a state where the handle was both
+     * created (fd leak / use) and == INVALID_SOCKET — mutually exclusive for
+     * winsock's unsigned SOCKET. The valid path is closed below, so suppress.
+     * Verify by removing this pragma and running `make analyze`. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wanalyzer-fd-leak"
+#pragma GCC diagnostic ignored "-Wanalyzer-fd-use-without-check"
     if (s == INVALID_SOCKET) {
         WSACleanup();
         return 0;
@@ -750,6 +757,7 @@ static int tcp_listening(int port) {
     int r = (connect(s, (struct sockaddr *)&addr, sizeof(addr)) == 0);
     closesocket(s);
     WSACleanup();
+#pragma GCC diagnostic pop
     return r;
 #else
     int s = socket(AF_INET, SOCK_STREAM, 0);
@@ -1788,13 +1796,19 @@ static void set_resume_session_once(const char *profile) {
         }
     } else {
         long blen = (long)strlen(buf);
-        long need = blen + 2 + (long)strlen(pref_line) + 1;
+        /* Decide the separator from the source buffer instead of reading back
+         * from new_buf after the memcpy: CI's gcc (13.x) could not relate the
+         * memcpy-written extent to the following new_buf[pos - 1] read and
+         * reported a heap over-read; buf[blen - 1] is the in-tree pattern the
+         * analyzer already proves (cf. detect_browser.c line trimming). */
+        int needs_nl = (blen == 0 || buf[blen - 1] != '\n');
+        long need = blen + (needs_nl ? 1 : 0) + (long)strlen(pref_line) + 1;
         char *new_buf = (char *)malloc((size_t)need);
         if (new_buf) {
             long pos = 0;
             memcpy(new_buf, buf, (size_t)blen);
             pos = blen;
-            if (pos == 0 || new_buf[pos - 1] != '\n') new_buf[pos++] = '\n';
+            if (needs_nl) new_buf[pos++] = '\n';
             memcpy(new_buf + pos, pref_line, strlen(pref_line));
             pos += (long)strlen(pref_line);
             new_buf[pos++] = '\n';
