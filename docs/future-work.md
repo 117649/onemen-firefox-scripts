@@ -119,6 +119,13 @@ VM, or a non-elevated user running against an admin-owned install dir. The autom
 - [ ] Publish a `helper_<platform>.sha256` asset alongside the helper binaries and assert the
       downloaded binary matches it (see §2.2 helper-binary trust).
 
+Staging publish target — mostly shipped, remainder folded here: `paths.js` already reads env
+variables over `installer.conf` (`cfg()` precedence) and `--mode=dev` provides the safe dev-build
+channel. Still open from the original plan: a **STAGING banner + guard** when env overrides redirect
+publish targets away from prod (fail or warn loudly), and **`.env-example` documentation of the
+staging keys** (`REPO_OWNER`, `ZIP_PAGES_BRANCH`, `RELEASE_NAME`, `HASHES_URL`, …). Tracked under
+#33 with the pipeline work.
+
 Items below shipped in v1.0 and are kept for reference:
 
 - ~~Compile + upload the installer and helper binaries~~ (shipped: `upload.mjs` builds + uploads all
@@ -159,6 +166,32 @@ sync problem is gone — there is nothing tracked that can drift (see ADR
       (currently requires a live browser).
 - [ ] Re-verify the `skippedHash.*` clearing logic when the remote hash changes or local files
       match.
+
+## 6. Test infrastructure
+
+Test-infrastructure gaps verified **not implemented on `main`** and **not covered** by #3 / #4 / #38
+as of 2026-09-05. The proposed tracking home is listed per item.
+
+- **Installer `--port 0` / `--server-only` test flags** (C: `installer/src/main.c` + Makefile).
+  `--port 0` binds an OS-ephemeral port so parallel CI jobs never collide on `DEFAULT_PORT=8777`;
+  `--server-only` skips the browser scan so the second-instance path (`tcp_listening`) is reachable
+  headless. The installer currently has no such flags. Unblocks: installer API-contract tests,
+  free-port/no-hijack/second-instance coverage. Home: a Phase 4 (#3) child issue.
+- **`env.json` deployment manifest** — the running installer writes port/URLs/hashes/run-id to a
+  file the E2E harness reads (local/CI parity; no port scraping). Not implemented. Home: the same
+  Phase 4 (#3) child issue as the flags (they ship together).
+- **E2E profile/process hygiene** — kill stray installer/browser processes between runs,
+  `removeProfileCompatibilityIni` after profile seeding, tag spawned processes for teardown —
+  deterministic repeats on all three OSes. Not implemented in `test/e2e/`. Home: #3 (Phase 4).
+- **`FIREFOX_BINARY` pinning** — E2E resolves the latest browser release at run time
+  (`downloads.mjs`); a runner-side vendor update can flip a green matrix red with no repo change.
+  Decide a pin/cache policy (URL with pinned version + periodic bump via the URL watchdog). Home: #3
+  now; revisited when the matrix expands (#31).
+- **`msys2/setup-msys2` release caching** — Windows legs run with `update: true`, re-fetching the
+  toolchain every run; `cache: true` would trade freshness for minutes per job (same trade the
+  cached `-fanalyzer` leg already made, PRs #105/#106). Home: #33 (pipeline automation) or as CI
+  polish under #4.
+- ~~**Test runner + layout decision** (`node:test`, type-first `test/`)~~ — settled: PR #52.
 
 ## Historical: Firefox 155 chrome-frame probes (obsolete)
 
