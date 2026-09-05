@@ -13,5 +13,15 @@ pnpm-lock.yaml
 dist
 # analyze-c.mjs result cache (hash-named JSON files, gitignored like .eslintcache)
 .analyzer-cache
-# vendored agent skill (upstream formatting; see docs/debugging-with-rdp.md)
-.agent
+# BEGIN managed: third-party skills (generated — run pnpm format:fix)
+**/.agents/skills/*
+!**/.agents/skills/ai-review
+!**/.agents/skills/change-workflow
+!**/.agents/skills/generated-files
+!**/.agents/skills/publishing
+# third-party (gh metadata): cavecrew
+# third-party (gh metadata): code-review
+# third-party (gh metadata): debugging-firefox
+# third-party (gh metadata): grill-me
+# third-party (gh metadata): lavish
+# END managed

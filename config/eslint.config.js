@@ -1,9 +1,31 @@
+import path from 'node:path';
+import {fileURLToPath, pathToFileURL} from 'node:url';
+
 import js from '@eslint/js';
 import markdown from '@eslint/markdown';
 import eslintConfigPrettier from 'eslint-config-prettier';
 import security from 'eslint-plugin-security';
 import {defineConfig} from 'eslint/config';
 import globals from 'globals';
+
+// Third-party skills (SKILL.md frontmatter `metadata.github-repo`, ADR 0022)
+// are linted never — derived here at config-load so this list cannot drift
+// from the installed skills. config/ is one level down, hence the ../ climb.
+// The classification reuses the watchdog's frontmatter parser (the same
+// source of truth `tools/sync-skill-gates.mjs` and the CI drift check use),
+// rather than a whole-file regex that a prose mention of "github-repo:" could
+// fool. Missing/unparseable SKILL.md → treated as authored (linted).
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+let thirdPartySkills = [];
+try {
+  const watchdogUrl = pathToFileURL(path.join(repoRoot, 'tools', 'skills-watchdog.mjs')).href;
+  const {loadInventory} = await import(watchdogUrl);
+  thirdPartySkills = loadInventory(repoRoot).map(i => `**/.agents/skills/${i.skill}`);
+} catch (err) {
+  // Config must load even if the tool tree is unavailable (rare: partial
+  // checkout). Fail open to linting everything except the known set.
+  console.error(`eslint config: skill classification unavailable (${err.message})`);
+}
 
 // Deep-import only the two environments this repo uses instead of loading the
 // whole plugin: `eslint-plugin-mozilla`'s index eagerly imports all 58 rules,
@@ -76,9 +98,10 @@ export default defineConfig([
     name: 'global-ignore',
     ignores: [
       '.github',
-      // Vendored agent skill — upstream formatting/rule style (see
-      // docs/debugging-with-rdp.md), kept out of the repo's lint+format gates.
-      '.agent',
+      // Third-party agent skills — upstream style, never linted (ADR 0022).
+      // Derived above from SKILL.md frontmatter; a new third-party skill is
+      // ignored automatically. (config/-anchored ignores need the **/ prefix
+      // to match at the repo root.)
       // Build outputs and generated artifacts (gitignored at the repo level).
       'dist/',
       'lib/',
@@ -87,6 +110,7 @@ export default defineConfig([
       '.vscode',
       '**/*local*/**',
       '**/*local*.*',
+      ...thirdPartySkills,
       '**/*.d.ts',
       '**/@types/**',
     ],

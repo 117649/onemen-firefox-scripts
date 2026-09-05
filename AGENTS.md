@@ -84,19 +84,22 @@ usually covers the need.
 ## Skills
 
 Task-scoped instruction modules an agent loads on demand when the task matches them — deep dive
-detail lives there so this file stays a checklist, not a manual. Two roots with different rules:
+detail lives there so this file stays a checklist, not a manual. All skills are direct children of
+`.agents/skills/<name>/` (flat, tracked; ADR 0022):
 
-- `.agents/skills/` — authored here + managed installs (`skills-lock.json`); tracked, and covered by
-  the lint/format gates.
-- `.agent/skills/` — vendored upstream (MIT, `debugging-firefox`); excluded from the lint/format
-  gates (see `docs/debugging-with-rdp.md`, `.prettierignore`, `eslint.config.js`).
+- **Third-party** (`metadata.github-repo` in `SKILL.md`): installed and updated only via
+  `gh skill install` / `gh skill update`; kept byte-identical to upstream — never linted or
+  formatted (excluded from the gates; see `eslint.config.js` / `.prettierignore`). Drift is surfaced
+  by the weekly watchdog as a tracking issue; updates land as reviewed PRs.
+- **Authored here**: fully covered by the lint/format gates; updates are normal PRs.
 
-| Skill             | Load when the task involves                               |
-| ----------------- | --------------------------------------------------------- |
-| `ai-review`       | Reviewing a PR — the ADR 0020 local review step           |
-| `change-workflow` | Making code changes — subsystem, docs, validation order   |
-| `generated-files` | Regenerating or reasoning about the untracked build files |
-| `publishing`      | Releasing — `upload` / `upload:local`, prod/dev modes     |
+| Skill               | Class       | Load when the task involves                                            |
+| ------------------- | ----------- | ---------------------------------------------------------------------- |
+| `ai-review`         | authored    | Reviewing a PR — the ADR 0020 local review step                        |
+| `change-workflow`   | authored    | Making code changes — subsystem, docs, validation order                |
+| `generated-files`   | authored    | Regenerating or reasoning about the untracked build files              |
+| `publishing`        | authored    | Releasing — `upload` / `upload:local`, prod/dev modes                  |
+| `debugging-firefox` | third-party | Debugging live Firefox via DevTools RDP (`docs/debugging-with-rdp.md`) |
 
 All paths are `<root>/.agents/skills/<name>/SKILL.md`.
 
@@ -203,12 +206,13 @@ Before finishing:
   **pnpm** (lockfile v9), `"type": "module"` for all `tools/` scripts.
 - **C toolchain:** MSYS2 UCRT64/mingw-w64 on Windows (`-mwindows` GUI subsystem); clang/gcc
   elsewhere; `clang-format` pinned via npm. All asset embedding is Node (`installer/embed.mjs`).
-- **CI** runs from `.github/workflows/` (ci.yml, e2e.yml, pages.yml, url-watchdog.yml). The
-  installer + updater E2E jobs and the publish gate are **path-filtered on PRs**: they skip when no
-  changed file can affect them (see `docs/DEVELOPING.md` → Continuous integration). Prod publish
-  stays manual from `main`; all publish scripts require a clean worktree.
-- **Interactive debugging of core files:** the MIT `debugging-firefox` RDP skill is vendored under
-  `.agent/skills/` — see `docs/debugging-with-rdp.md` (never put it in the lint/format gates).
+- **CI** runs from `.github/workflows/` (ci.yml, e2e.yml, pages.yml, url-watchdog.yml,
+  skills-watchdog.yml). The installer + updater E2E jobs and the publish gate are **path-filtered on
+  PRs**: they skip when no changed file can affect them (see `docs/DEVELOPING.md` → Continuous
+  integration). Prod publish stays manual from `main`; all publish scripts require a clean worktree.
+- **Interactive debugging of core files:** the MIT `debugging-firefox` RDP skill is `gh`-installed
+  under `.agents/skills/` — see `docs/debugging-with-rdp.md` (never put it in the lint/format
+  gates).
 
 ## Generated files
 
