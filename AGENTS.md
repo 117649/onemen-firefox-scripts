@@ -105,7 +105,8 @@ All paths are `<root>/.agents/skills/<name>/SKILL.md`.
 
 ## Commands
 
-Package manager is **pnpm** (root-only workspace, `"type": "module"`). No git hooks — generated
+Package manager is **pnpm** (root-only workspace, `"type": "module"`). Git hooks are opt-in only
+(`pnpm hooks:install`: pre-push gate + worktree post-checkout) and never generate files — generated
 files are produced on demand by the build/publish tooling.
 
 ```bash
@@ -172,8 +173,9 @@ is not gated on CI — it can help debug failing checks. Add no CI/repo AI secre
 ## Agent workflow
 
 **Task worktrees:** use `<workspace>/worktrees/<slug>/` (one deletable folder per task) and remove
-them before finishing (`git worktree remove`; retry the empty dir if a process still held it).
-Worktree node_modules link rules live in the `change-workflow` skill.
+them before finishing (`git worktree remove`; retry the empty dir if a process still held it). Run
+`pnpm install` in a fresh worktree; never link the parent's node_modules into it — details in the
+`change-workflow` skill.
 
 Before changing code:
 

@@ -13,20 +13,24 @@ description:
 
 Do task work in a fresh `git worktree add ../<parent>/worktrees/<slug> -b <branch>` (one folder per
 task, trivially deletable, out of the parent dir). A stale-husk sweep after threads exit is just
-`rmdir worktrees/*`. Remove the worktree before finishing (`git worktree remove <path>`; retry the
-empty dir later if a process still holds it as its cwd).
+`rmdir worktrees/*`. Remove the worktree before finishing (`git worktree remove <path>`; add
+`--force` if it refuses over the gitignored node_modules, and retry the empty dir later if a process
+still holds it as its cwd).
 
-A fresh worktree carries no install. Link the parent's via `tools/publish/refNodeModules.mjs`
-(`import` it and call `linkNodeModules(parentRoot, worktreeRoot)`; it returns null when the parent
-has no install). That is a junction/symlink to the parent's real store, so:
+A fresh worktree carries no install: run `pnpm install` in it before running tools. pnpm hard-links
+packages from the global content-addressable store, so this is fast and disk-cheap, and the
+worktreestays fully self-contained — nothing done inside it can corrupt the parent checkout. When
+the opt-in githooks are installed (`pnpm hooks:install`), the `post-checkout` hook already does this
+for brand-new worktrees, so a fresh worktree is ready to use immediately. (The hook does not copy
+the root `.env` — the GitHub token stays in the main checkout only; copy it by hand if a token-using
+command must run from a worktree.)
 
-- **safe to _run_ tools through it** (eslint, prettier, the test runner);
-- **never run pnpm-mutating commands inside the worktree** — `pnpm install` / adding a dependency
-  re-homes the parent's `.pnpm` link farm toward the worktree's virtual store, leaving the parent
-  with dangling links the moment the worktree is deleted. Install/update only in the parent
-  checkout, then re-link.
-- clean up with `unlinkNodeModules(worktreeRoot)` **before** `git worktree remove`, so removal never
-  traverses into the shared store.
+Never link/symlink the parent's node_modules into a worktree (junction or otherwise). A shared
+mutable store looks cheaper but corrupted the parent install twice in one day: pnpm invoked inside
+the worktree re-homes the parent's `.pnpm` link farm toward the worktree's virtual store, and
+removing the worktree then leaves the parent with dangling links.
+(`tools/publish/refNodeModules.mjs` is internal to the `--ref` publish flow — do not reuse it for
+task worktrees.)
 
 ## Before editing
 
