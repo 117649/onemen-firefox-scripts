@@ -82,6 +82,51 @@ CI/repo AI secret exists or should be added; CodeRabbit `review:batch` is an opt
 - The review is not gated on CI. It can help debug failing checks; it never blocks a merge by itself
   — the agent's assessment is the filter.
 
+## Local reviewer vs CodeRabbit — evidence from PR #123 (2026-09)
+
+Head-to-head on the same PR: local `review:local` 12 findings / 6 accepted (50%); CodeRabbit 11
+findings / 9 right + 1 partial (86%). They catch **different classes of bug** — treat them as
+complementary on CI/platform PRs:
+
+- **Local reviewer** is strongest on code-internal footguns: env coercion (NaN backoff),
+  `throw undefined`, spread overriding a coercion, arg-parsing degradation, notification-spam
+  design. Its misses were cross-file: claims about code it didn't trace ("undeclared `repo`"
+  declared 7 lines up, object-shape assumptions, ISO-timestamps-sorted-as-strings false alarm).
+- **CodeRabbit** is strongest on linter receipts (actionlint, zizmor) and **GitHub platform
+  semantics**: concurrency races, API pagination, data-loss paths (temp file written next to the
+  user's file). Its main weakness: it doesn't run anything — a live probe disproved its waterfox CDN
+  claim in one minute.
+- **Verify platform-semantics fixes before implementing.** The zizmor "scope `issues: write` to the
+  job" fix silently dropped `actions: write` (a job-level `permissions:` block REPLACES the
+  workflow-level one) and 403'd every subsequent prod publish — reverted in #125. Linter-clean is
+  not semantics-correct.
+- **Probe external endpoints live, don't reason statically** — one `node --input-type=module -e`
+  fetch settles regex-vs-reality claims (CDN hrefs) in seconds and is posted as evidence in the
+  thread.
+- **Chase "minor" findings to root cause** — investigating a dispatch-args nit uncovered
+  `BROWSER_PIN_VERSION` exported but read by nothing, a bug BOTH reviews missed until then.
+- Never merge a linter-suggested security scoping on a publish/release workflow without walking
+  every capability that job uses.
+
+### Second sample — PR #122 replay (2026-09, pre-fix commit `1c3e8a0`)
+
+Replayed the local reviewer against the commit **before** #122's CodeRabbit-triage fixes
+(CodeRabbit: 7 actionable, 5 accepted + fixed): **0 code findings** (rate-limit noise; 1–2 files
+skipped per pass — treat as "far fewer", not a hard zero). Directionally consistent with #123 and
+sharper:
+
+- **On tooling/workflow PRs (`.github/**`, `tools/ci|publish/**`) the local reviewer is nearly
+  blind** — its diff-hunk window can't see cross-file API semantics (`behind_by` vs `ahead_by`,
+  `state=open` vs reopened issues, `--fix` convergence). Run CodeRabbit (`@coderabbitai review`) on
+  these PRs and treat the local pass as advisory garnish, not evidence of health.
+- **Findings on pristine third-party skills (ADR 0022, `metadata.github-repo` frontmatter) are
+  auto-rejected** — the content is byte-identical to upstream and must not be edited. The replay
+  burned quota to flag upstream's own wording ("truncated sentence") — a false positive by
+  construction. Don't even relay them upstream without checking the source first.
+- **Check coverage before trusting a zero** — the summary lists provider-skipped files; a
+  zero-findings pass that skipped half the files proves nothing. (Planned tooling fix: a coverage
+  line in the summary.)
+
 ## Also know
 
 - `.github/workflows/ai-review.yml` was removed; do not re-add CI AI review.
