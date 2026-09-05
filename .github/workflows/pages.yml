@@ -39,6 +39,7 @@ on:
 permissions:
   contents: write # release assets + gh-pages pushes
   actions: write # release-gate cache-prune step deletes stale Actions caches
+  issues: read # job-level default; pre-publish elevates to write (below)
 
 concurrency:
   group: pages-publish
@@ -58,6 +59,10 @@ jobs:
   pre-publish:
     name: check browser version drift
     runs-on: ubuntu-latest
+    # ADR 0021: this job's warn-and-continue path opens a deduped notification
+    # issue when a fork's version lookup fails — the only job that needs it.
+    permissions:
+      issues: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -84,6 +89,10 @@ jobs:
         env:
           MODE: ${{ inputs.mode }}
           VALIDATED_DIR: ${{ github.workspace }}/.watchdog-validated
+          # ADR 0021: a fork whose version lookup still fails after the
+          # resolver's retries + mirrors warns (annotation + notification
+          # issue) instead of blocking the publish — issues: write above.
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           if node tools/check-browser-downloads.mjs --drift --require-validated; then
             echo "no browser version drift since the last watchdog run"
